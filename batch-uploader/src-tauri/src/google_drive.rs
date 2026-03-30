@@ -157,9 +157,11 @@ pub async fn pick_and_list_files() -> Result<PickerResult, String> {
                     continue;
                 }
 
+                // Folders are skipped while using drive.file scope — it only grants
+                // access to individually picked files, not folder children.
+                // TODO: switch to drive.readonly scope after Google app verification
+                // to enable folder recursion via list_folder_recursive().
                 if mime_type == "application/vnd.google-apps.folder" {
-                    let folder_files = list_folder_recursive(&hub, &id, &name).await?;
-                    all_files.extend(folder_files);
                     continue;
                 }
 
@@ -190,6 +192,8 @@ pub async fn pick_and_list_files() -> Result<PickerResult, String> {
 
 /// Recursively list all files in a Drive folder, building relative_dir paths.
 /// Uses Box::pin to allow async recursion.
+/// NOTE: Currently unused — requires drive.readonly scope (pending Google app verification).
+#[allow(dead_code)]
 fn list_folder_recursive<'a>(
     hub: &'a DriveHub<HttpsConnector>,
     folder_id: &'a str,
