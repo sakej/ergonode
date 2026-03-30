@@ -7,6 +7,7 @@ Built with [Tauri](https://tauri.app/) (Rust backend + vanilla HTML/CSS/JS front
 ## Features
 
 - **Drag & drop** files or folders — browse with native file picker
+- **Google Drive import** — pick files directly from Google Drive, download and upload to Ergonode
 - **Folder structure recreation** — drop a folder and recreate its tree in Ergonode automatically
 - **Upload options** — flat upload (no subfolders) and include root folder toggles
 - **Revert upload** — undo the last upload batch (delete files and/or folders) with batched GraphQL mutations
@@ -47,11 +48,13 @@ Built with [Tauri](https://tauri.app/) (Rust backend + vanilla HTML/CSS/JS front
 3. Enter your Ergonode instance URL and API key
 4. Click **Connect**
 5. Select a destination folder (or create a new one)
-6. Drag & drop files or folders and click **Upload All**
+6. Drag & drop files/folders, browse, or click **import from Google Drive**
 7. When dropping folders, a confirmation modal lets you choose:
    - **Flat upload** — skip subfolder creation, upload all files to destination
    - **Include root folder** — create the dropped folder as a parent in Ergonode
 8. After uploading, click **Revert Upload** to undo (delete uploaded files and/or created folders)
+
+> **Note:** Google Drive import requires a Client ID — see [Google Drive Setup](#google-drive-setup) below.
 
 ## Installation Notes
 
@@ -76,6 +79,48 @@ xattr -cr /Applications/"Ergonode Batch Uploader.app"
 
 **Option C** — System Settings → Privacy & Security → "Open Anyway"
 
+## Google Drive Setup
+
+Google Drive import is optional. Without a Client ID, the app works normally — the Drive link is simply hidden.
+
+### Creating your own Client ID
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project (or select an existing one)
+3. Enable the **Google Drive API**:
+   - Navigate to **APIs & Services** → **Library**
+   - Search for "Google Drive API" → click **Enable**
+4. Configure the **OAuth consent screen**:
+   - Go to **APIs & Services** → **OAuth consent screen**
+   - Choose **External** user type
+   - Fill in the required fields (app name, support email)
+   - Add scope: `https://www.googleapis.com/auth/drive.file`
+   - Add yourself as a test user (required while app is in "Testing" status)
+5. Create **OAuth credentials**:
+   - Go to **APIs & Services** → **Credentials**
+   - Click **Create Credentials** → **OAuth client ID**
+   - Application type: **Desktop app**
+   - Name it anything (e.g. "Ergonode Batch Uploader")
+   - Click **Create** and copy the **Client ID**
+
+### Using your Client ID
+
+Create a `.env` file in the `batch-uploader/` directory:
+
+```
+GOOGLE_CLIENT_ID=your-client-id-here.apps.googleusercontent.com
+```
+
+Then build or run the app — the Client ID is embedded at compile time.
+
+> **Testing mode:** While your Google Cloud project is in "Testing" status, only users listed as test users can authorize. This is fine for personal use. Publishing to production requires [Google verification](https://support.google.com/cloud/answer/9110914).
+
+### Current limitations
+
+- **Files only** — folder picking from Google Drive is not yet supported (requires `drive.readonly` scope, which needs Google app verification). Users can select individual files via the Picker.
+- **Session-only auth** — no refresh tokens are stored. Each "import from Google Drive" click starts a fresh sign-in.
+- **Token expiry** — Google access tokens last ~1 hour. Very large imports may require re-initiating the Drive flow.
+
 ## Building from Source
 
 ### Prerequisites
@@ -93,6 +138,8 @@ npm run tauri build
 ```
 
 The built app will be in `src-tauri/target/release/bundle/`.
+
+To include Google Drive support, create a `.env` file first (see [Google Drive Setup](#google-drive-setup)).
 
 ### Development
 
@@ -115,9 +162,9 @@ On receiving a 429 (Too Many Requests), the app pauses with exponential backoff 
 
 ## Tech Stack
 
-- **Backend**: Rust + Tauri 2.x + reqwest (multipart HTTP)
+- **Backend**: Rust + Tauri 2.x + reqwest (multipart HTTP) + google-drive3 SDK
 - **Frontend**: Vanilla HTML/CSS/JS (no framework)
-- **API**: Ergonode GraphQL (`multimediaCreate` mutation, multipart POST)
+- **API**: Ergonode GraphQL (`multimediaCreate` mutation, multipart POST), Google Drive API v3
 - **Config**: JSON file in OS config directory
 
 ## License
