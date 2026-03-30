@@ -6,13 +6,16 @@ Built with [Tauri](https://tauri.app/) (Rust backend + vanilla HTML/CSS/JS front
 
 ## Features
 
-- **Drag & drop** files or browse with native file picker
+- **Drag & drop** files or folders — browse with native file picker
+- **Folder structure recreation** — drop a folder and recreate its tree in Ergonode automatically
+- **Upload options** — flat upload (no subfolders) and include root folder toggles
+- **Revert upload** — undo the last upload batch (delete files and/or folders) with batched GraphQL mutations
 - **70+ supported file types** — images, videos, documents, 3D models, CAD, Adobe files, and more
 - **Folder tree** browser — pick or create destination folders directly from your Ergonode instance
 - **Rate limit handling** — respects Ergonode's 250 req/min media limit with automatic exponential backoff on 429 responses
 - **Concurrent uploads** — up to 4 parallel uploads with dynamic concurrency adjustment
 - **Progress tracking** — per-file status with real Ergonode error messages
-- **Settings persistence** — remembers your API URL and key between sessions
+- **Settings persistence** — remembers your API URL, key, and upload preferences between sessions
 - **Stop & resume** — cancel uploads mid-flight, retry failed files
 - **Cross-platform** — Windows 10+, macOS, Linux
 
@@ -44,7 +47,11 @@ Built with [Tauri](https://tauri.app/) (Rust backend + vanilla HTML/CSS/JS front
 3. Enter your Ergonode instance URL and API key
 4. Click **Connect**
 5. Select a destination folder (or create a new one)
-6. Drag & drop your files and click **Upload All**
+6. Drag & drop files or folders and click **Upload All**
+7. When dropping folders, a confirmation modal lets you choose:
+   - **Flat upload** — skip subfolder creation, upload all files to destination
+   - **Include root folder** — create the dropped folder as a parent in Ergonode
+8. After uploading, click **Revert Upload** to undo (delete uploaded files and/or created folders)
 
 ## Installation Notes
 
