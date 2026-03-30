@@ -16,6 +16,18 @@ pub struct UploadResult {
     pub rate_limited: bool,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct DeleteItemResult {
+    pub path: String,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct BatchDeleteResult {
+    pub results: Vec<DeleteItemResult>,
+}
+
 // ---------- Internal GraphQL response types ----------
 
 #[derive(Deserialize)]
@@ -292,6 +304,112 @@ impl ErgonodeClient {
         }
 
         Ok(())
+    }
+
+    /// Send a batched GraphQL request with up to 50 aliased delete mutations.
+    /// `delete_type` is "file" or "folder".
+    pub async fn batch_delete(
+        &self,
+        paths: &[String],
+        delete_type: &str,
+    ) -> Result<BatchDeleteResult, String> {
+        let mutation_name = match delete_type {
+            "folder" => "multimediaFolderDelete",
+            _ => "multimediaDelete",
+        };
+
+        // Build aliased mutations: d0: multimediaDelete(input:{path:"..."}) { __typename }
+        let mutations: Vec<String> = paths
+            .iter()
+            .enumerate()
+            .map(|(i, path)| {
+                let escaped = path.replace('"', r#"\""#);
+                format!(r#"d{i}:{mutation_name}(input:{{path:\"{escaped}\"}}){{__typename}}"#)
+            })
+            .collect();
+
+        let query = format!(
+            r#"{{"query":"mutation{{{}}}" }}"#,
+            mutations.join(" ")
+        );
+
+        let resp = self
+            .client
+            .post(self.endpoint())
+            .header("X-API-KEY", &self.api_key)
+            .header("Content-Type", "application/json")
+            .body(query)
+            .send()
+            .await
+            .map_err(|e| format!("Network error: {e}"))?;
+
+        let status = resp.status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            return Err("Rate limited (429). Please try again later.".to_string());
+        }
+        if !status.is_success() {
+            return Err(format!("Server returned status {status}"));
+        }
+
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("Bad response: {e}"))?;
+
+        // Parse per-alias results from data and errors
+        let data = body.get("data");
+        let errors = body.get("errors").and_then(|e| e.as_array());
+
+        // Build a set of aliases that had errors
+        let mut error_map: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        if let Some(errs) = errors {
+            for err in errs {
+                // Errors may have a "path" field like ["d0"] indicating which alias failed
+                if let Some(path_arr) = err.get("path").and_then(|p| p.as_array()) {
+                    if let Some(alias) = path_arr.first().and_then(|a| a.as_str()) {
+                        let msg = err
+                            .get("message")
+                            .and_then(|m| m.as_str())
+                            .unwrap_or("Unknown error");
+                        error_map.insert(alias.to_string(), msg.to_string());
+                    }
+                }
+            }
+        }
+
+        let results: Vec<DeleteItemResult> = paths
+            .iter()
+            .enumerate()
+            .map(|(i, path)| {
+                let alias = format!("d{i}");
+                if let Some(err_msg) = error_map.get(&alias) {
+                    DeleteItemResult {
+                        path: path.clone(),
+                        success: false,
+                        error: Some(err_msg.clone()),
+                    }
+                } else {
+                    // Check if data contains the alias (successful deletion)
+                    let has_data = data.and_then(|d| d.get(&alias)).is_some();
+                    if has_data {
+                        DeleteItemResult {
+                            path: path.clone(),
+                            success: true,
+                            error: None,
+                        }
+                    } else {
+                        DeleteItemResult {
+                            path: path.clone(),
+                            success: false,
+                            error: Some("No response for this item".to_string()),
+                        }
+                    }
+                }
+            })
+            .collect();
+
+        Ok(BatchDeleteResult { results })
     }
 
     /// Upload a file via multipart POST (multimediaCreate mutation).

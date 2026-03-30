@@ -3,7 +3,7 @@ mod ergonode;
 mod fs_utils;
 
 use config::AppConfig;
-use ergonode::{ErgonodeClient, FolderInfo, UploadResult};
+use ergonode::{ErgonodeClient, FolderInfo, UploadResult, BatchDeleteResult};
 
 #[tauri::command]
 fn load_settings() -> AppConfig {
@@ -79,13 +79,24 @@ async fn create_folders_batch(
         .await
 }
 
+#[tauri::command]
+async fn batch_delete(
+    api_url: String,
+    api_key: String,
+    paths: Vec<String>,
+    delete_type: String,
+) -> Result<BatchDeleteResult, String> {
+    let client = ErgonodeClient::new(&api_url, &api_key);
+    client.batch_delete(&paths, &delete_type).await
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             load_settings, save_settings, clear_settings,
             test_connection, fetch_folders, create_folder, upload_file, get_file_size,
-            scan_directory, is_directory, create_folders_batch
+            scan_directory, is_directory, create_folders_batch, batch_delete
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
