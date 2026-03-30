@@ -451,8 +451,20 @@ async function handleFilePicker() {
       multiple: true,
       filters: [
         {
-          name: "Images",
-          extensions: ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "tiff", "tif", "ico"],
+          name: "Supported Files",
+          extensions: [
+            "3ds", "dwf", "dwg", "dxf", "fbx", "glb", "obj", "skp", "stp", "igs", "plt", "hpgl",
+            "ai", "eps", "svg", "cdr",
+            "bmp", "gif", "jpeg", "jpg", "png", "tif", "tiff", "webp", "avif", "heic", "hdr",
+            "mkv", "mov", "mp4", "webm", "wmv", "hevc",
+            "doc", "docx", "odt", "pdf", "txt",
+            "csv", "ods", "xls", "xlsx",
+            "ppt", "pptx", "key",
+            "psd", "indd", "indt",
+            "ggpkg",
+            "zip",
+            "max", "usdz", "vrm",
+          ],
         },
         {
           name: "All Files",

@@ -1,12 +1,13 @@
 # Ergonode Batch Uploader
 
-A lightweight desktop app for bulk-uploading images to your Ergonode media library.
+A lightweight desktop app for bulk-uploading files to your Ergonode media library.
 
 Built with [Tauri](https://tauri.app/) (Rust backend + vanilla HTML/CSS/JS frontend). No frameworks, no bloat — just a ~5MB native app.
 
 ## Features
 
 - **Drag & drop** files or browse with native file picker
+- **70+ supported file types** — images, videos, documents, 3D models, CAD, Adobe files, and more
 - **Folder tree** browser — pick or create destination folders directly from your Ergonode instance
 - **Rate limit handling** — respects Ergonode's 250 req/min media limit with automatic exponential backoff on 429 responses
 - **Concurrent uploads** — up to 4 parallel uploads with dynamic concurrency adjustment
@@ -14,6 +15,22 @@ Built with [Tauri](https://tauri.app/) (Rust backend + vanilla HTML/CSS/JS front
 - **Settings persistence** — remembers your API URL and key between sessions
 - **Stop & resume** — cancel uploads mid-flight, retry failed files
 - **Cross-platform** — Windows 10+, macOS, Linux
+
+## Supported File Types
+
+| Category | Extensions |
+|---|---|
+| 3D / CAD | 3ds, dwf, dwg, dxf, fbx, glb, obj, skp, stp, igs, plt, hpgl |
+| Vector Graphics | ai, eps, svg, cdr |
+| Raster Images | bmp, gif, jpeg, jpg, png, tif, tiff, webp, avif, heic, hdr |
+| Video / Animation | mkv, mov, mp4, webm, wmv, hevc |
+| Documents | doc, docx, odt, pdf, txt |
+| Spreadsheets | csv, ods, xls, xlsx |
+| Presentations | ppt, pptx, key |
+| Adobe / Design | psd, indd, indt |
+| Special Packages | ggpkg |
+| Archives | zip |
+| 3D Scenes | max, usdz, vrm |
 
 ## Requirements
 

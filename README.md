@@ -6,7 +6,7 @@ A collection of open-source tools and utilities for [Ergonode](https://ergonode.
 
 | Tool | Description |
 |---|---|
-| [Batch Uploader](batch-uploader/) | Desktop app for bulk-uploading images to Ergonode media library |
+| [Batch Uploader](batch-uploader/) | Desktop app for bulk-uploading files to Ergonode media library |
 
 ## License
 
