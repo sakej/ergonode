@@ -8,8 +8,90 @@
 </head>
 <body>
   <div id="app">
-    <h1>Ergonode Batch Uploader</h1>
-    <p>Loading...</p>
+
+    <!-- Header -->
+    <header class="app-header">
+      <h1>Ergonode Batch Uploader</h1>
+    </header>
+
+    <!-- Settings Card -->
+    <section class="card" id="settings-card">
+      <h2>Connection Settings</h2>
+      <div class="form-group">
+        <label for="api-url">API URL</label>
+        <input type="url" id="api-url" placeholder="https://your-instance.ergonode.com">
+      </div>
+      <div class="form-group">
+        <label for="api-key">API Key</label>
+        <div class="input-with-toggle">
+          <input type="password" id="api-key" placeholder="Enter your API key">
+          <button type="button" class="btn-icon" id="toggle-key" title="Show/hide API key">
+            <span id="eye-icon">Show</span>
+          </button>
+        </div>
+      </div>
+      <div class="button-row">
+        <button class="btn btn-primary" id="btn-connect">Connect</button>
+        <button class="btn btn-secondary" id="btn-clear">Clear Settings</button>
+      </div>
+      <div id="connection-status" class="status-message hidden"></div>
+    </section>
+
+    <!-- Workspace (hidden until connected) -->
+    <div id="workspace" class="hidden">
+
+      <!-- Folder Tree Card -->
+      <section class="card" id="folder-card">
+        <div class="card-header">
+          <h2>Upload Destination</h2>
+          <div class="button-row">
+            <button class="btn btn-small btn-secondary" id="btn-new-folder">New Folder</button>
+            <button class="btn btn-small btn-secondary" id="btn-refresh-folders">Refresh</button>
+          </div>
+        </div>
+        <div id="new-folder-form" class="hidden">
+          <div class="inline-form">
+            <input type="text" id="new-folder-name" placeholder="Folder name">
+            <button class="btn btn-small btn-primary" id="btn-create-folder">Create</button>
+            <button class="btn btn-small btn-secondary" id="btn-cancel-folder">Cancel</button>
+          </div>
+          <div id="new-folder-status" class="status-message hidden"></div>
+        </div>
+        <div id="folder-tree" class="folder-tree">
+          <div class="folder-loading">Loading folders...</div>
+        </div>
+        <div id="selected-folder-display" class="selected-folder">
+          Destination: <strong id="selected-folder-path">/ (root)</strong>
+        </div>
+      </section>
+
+      <!-- Drop Zone + File List Card -->
+      <section class="card" id="files-card">
+        <h2>Files</h2>
+        <div id="drop-zone" class="drop-zone">
+          <div class="drop-zone-content">
+            <div class="drop-zone-icon">+</div>
+            <p>Drag &amp; drop files here or click to browse</p>
+          </div>
+        </div>
+
+        <div id="upload-controls" class="hidden">
+          <div class="upload-header">
+            <div class="upload-summary">
+              <span id="upload-counter">0 / 0 complete</span>
+              <span id="rate-limit-msg" class="rate-limit-msg hidden"></span>
+            </div>
+            <div class="button-row">
+              <button class="btn btn-primary" id="btn-upload">Upload All</button>
+              <button class="btn btn-secondary" id="btn-clear-files">Clear All</button>
+            </div>
+          </div>
+          <div id="file-list" class="file-list"></div>
+        </div>
+      </section>
+
+    </div>
+
   </div>
   <script src="app.js"></script>
 </body>
