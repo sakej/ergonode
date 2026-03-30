@@ -46,6 +46,29 @@ Built with [Tauri](https://tauri.app/) (Rust backend + vanilla HTML/CSS/JS front
 5. Select a destination folder (or create a new one)
 6. Drag & drop your files and click **Upload All**
 
+## Installation Notes
+
+### Windows: SmartScreen warning
+
+This build is not code-signed. Windows SmartScreen may show a warning when running the installer.
+
+Click **More info** → **Run anyway**
+
+Or: right-click the `.msi`/`.exe` → Properties → check **Unblock** → Apply
+
+### macOS: "damaged and can't be opened"
+
+macOS Gatekeeper blocks apps that aren't signed with an Apple Developer certificate. To open the app after installing:
+
+**Option A** — Terminal:
+```sh
+xattr -cr /Applications/"Ergonode Batch Uploader.app"
+```
+
+**Option B** — Right-click the app → Open → Open Anyway
+
+**Option C** — System Settings → Privacy & Security → "Open Anyway"
+
 ## Building from Source
 
 ### Prerequisites
