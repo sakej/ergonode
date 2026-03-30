@@ -29,6 +29,7 @@ const state = {
   pauseTimer: null,
 
   // Revert ledger (session-scoped)
+  revertMode: false,
   uploadLedger: null,       // { uploadedFiles: [{name, folderPath}], createdFolders: [path] }
   pendingCreatedFolders: [], // temp: folders created in pre-flight, moved to ledger after upload
 };
@@ -130,7 +131,11 @@ const folderModal         = $("#folder-modal");
 const folderModalBody     = $("#folder-modal-body");
 const folderModalCancel   = $("#folder-modal-cancel");
 const folderModalContinue = $("#folder-modal-continue");
-const btnRevert          = $("#btn-revert");
+const scanSpinner        = $("#scan-spinner");
+const scanSpinnerText    = $("#scan-spinner-text");
+const folderModalOptions = $("#folder-modal-options");
+const flatUploadEl       = $("#flat-upload");
+const includeRootEl      = $("#include-root");
 const revertModal        = $("#revert-modal");
 const revertFilesCheck   = $("#revert-files-check");
 const revertFoldersCheck = $("#revert-folders-check");
@@ -189,10 +194,12 @@ function bindEvents() {
   dropZone.addEventListener("click", handleFilePicker);
 
   // Upload controls
-  btnUpload.addEventListener("click", startUploadQueue);
+  btnUpload.addEventListener("click", () => {
+    if (state.revertMode) handleRevert();
+    else startUploadQueue();
+  });
   btnStop.addEventListener("click", stopUploadQueue);
   btnClearFiles.addEventListener("click", clearFiles);
-  btnRevert.addEventListener("click", handleRevert);
 
   // Single connection toggle
   const savedSingle = localStorage.getItem("singleConnection") === "true";
@@ -206,6 +213,16 @@ function bindEvents() {
     localStorage.setItem("singleConnection", single);
     state.maxConcurrency = single ? 1 : 4;
     state.concurrency = single ? 1 : 4;
+  });
+
+  // Folder upload options (remembered)
+  flatUploadEl.checked = localStorage.getItem("flatUpload") === "true";
+  includeRootEl.checked = localStorage.getItem("includeRoot") === "true";
+  flatUploadEl.addEventListener("change", () => {
+    localStorage.setItem("flatUpload", flatUploadEl.checked);
+  });
+  includeRootEl.addEventListener("change", () => {
+    localStorage.setItem("includeRoot", includeRootEl.checked);
   });
 }
 
@@ -288,7 +305,6 @@ async function handleRevert() {
   if (!ledger) return;
 
   // Disable buttons during revert
-  btnRevert.disabled = true;
   btnUpload.disabled = true;
   btnClearFiles.disabled = true;
 
@@ -396,8 +412,7 @@ async function handleRevert() {
 
   // Clear ledger and re-enable buttons
   state.uploadLedger = null;
-  btnRevert.classList.add("hidden");
-  btnRevert.disabled = false;
+  exitRevertMode();
   btnUpload.disabled = false;
   btnClearFiles.disabled = false;
   renderFileList();
@@ -795,10 +810,11 @@ function resetDropState() {
 }
 
 async function addFoldersByPath(dirPaths) {
-  // Show scanning indicator immediately
+  // Show centered spinner immediately
   dropZone.classList.add("hidden");
-  uploadControls.classList.remove("hidden");
-  showInlineStatus("Scanning folders...");
+  uploadControls.classList.add("hidden");
+  scanSpinner.classList.remove("hidden");
+  scanSpinnerText.textContent = "Scanning folders...";
 
   // Scan all dropped directories
   let allScanned = [];
@@ -806,9 +822,9 @@ async function addFoldersByPath(dirPaths) {
     try {
       const scanned = await invoke("scan_directory", { path: dirPath });
       allScanned = allScanned.concat(scanned);
-      showInlineStatus(`Scanning... ${allScanned.length} files found`);
+      scanSpinnerText.textContent = `Scanning... ${allScanned.length} files found`;
     } catch (err) {
-      hideInlineStatus();
+      scanSpinner.classList.add("hidden");
       showInlineError("Failed to read folder: " + err);
       resetDropState();
       return;
@@ -816,19 +832,21 @@ async function addFoldersByPath(dirPaths) {
   }
 
   if (allScanned.length === 0) {
-    hideInlineStatus();
+    scanSpinner.classList.add("hidden");
     resetDropState();
     return;
   }
 
-  hideInlineStatus();
+  scanSpinner.classList.add("hidden");
+  uploadControls.classList.remove("hidden");
 
-  // Collect unique relative subfolder paths (non-empty)
-  const subfolders = [...new Set(
-    allScanned
-      .map(f => f.relative_dir)
-      .filter(d => d.length > 0)
-  )];
+  // Show folder options inside modal if there are subfolders
+  const hasStructure = allScanned.some(f => f.relative_dir.length > 0);
+  if (hasStructure) {
+    folderModalOptions.classList.remove("hidden");
+  } else {
+    folderModalOptions.classList.add("hidden");
+  }
 
   // Compute display destination
   const destName = state.selectedFolder
@@ -836,18 +854,70 @@ async function addFoldersByPath(dirPaths) {
     : "/ (root)";
 
   // Build modal message
-  let msg = `This will create the folder structure inside "${destName}".`;
-  if (subfolders.length > 0) msg += `\n\n${subfolders.length} subfolder(s) and `;
-  else msg += `\n\n`;
-  msg += `${allScanned.length} file(s) will be uploaded.`;
-
-  console.log("[folder-drop] Scanned:", allScanned.length, "files,", subfolders.length, "subfolders");
+  let msg = `${allScanned.length} file(s) from ${dirPaths.length} folder(s) will be uploaded to "${destName}".`;
 
   const confirmed = await showFolderModal(msg);
   if (!confirmed) {
     resetDropState();
     return;
   }
+
+  // Read toggle values AFTER user has had a chance to change them
+  const includeRoot = includeRootEl.checked;
+  const flatUpload = flatUploadEl.checked;
+
+  // Determine root folder name(s) for "include root" option
+  const rootNames = dirPaths.map(p =>
+    p.replace(/\\/g, "/").split("/").filter(Boolean).pop()
+  ).filter(Boolean);
+
+  // Apply options to relative_dirs
+  if (flatUpload && includeRoot) {
+    // Flat inside root: all files go into root folder, no substructure
+    for (const dirPath of dirPaths) {
+      const rootName = dirPath.replace(/\\/g, "/").split("/").filter(Boolean).pop();
+      if (!rootName) continue;
+      for (const f of allScanned) {
+        if (f.absolute_path.startsWith(dirPath)) {
+          f.relative_dir = rootName;
+        }
+      }
+    }
+  } else if (includeRoot) {
+    // Full structure with root: prepend root folder name
+    for (const dirPath of dirPaths) {
+      const rootName = dirPath.replace(/\\/g, "/").split("/").filter(Boolean).pop();
+      if (!rootName) continue;
+      for (const f of allScanned) {
+        if (f.absolute_path.startsWith(dirPath)) {
+          f.relative_dir = f.relative_dir
+            ? rootName + "/" + f.relative_dir
+            : rootName;
+        }
+      }
+    }
+  } else if (flatUpload) {
+    // Flat without root: clear all relative_dirs
+    for (const f of allScanned) {
+      f.relative_dir = "";
+    }
+  }
+  // else: default — keep original relative_dirs (structure without root)
+
+  // Collect unique subfolder paths including all intermediates (for proper revert)
+  const leafDirs = new Set(
+    allScanned.map(f => f.relative_dir).filter(d => d.length > 0)
+  );
+  const allPaths = new Set();
+  for (const leaf of leafDirs) {
+    const parts = leaf.split("/");
+    for (let i = 1; i <= parts.length; i++) {
+      allPaths.add(parts.slice(0, i).join("/"));
+    }
+  }
+  const subfolders = [...allPaths];
+
+  console.log("[folder-drop] Scanned:", allScanned.length, "files,", subfolders.length, "subfolders, flat:", flatUpload, "includeRoot:", includeRoot);
 
   // Create folders in Ergonode pre-flight
   if (subfolders.length > 0) {
@@ -867,7 +937,7 @@ async function addFoldersByPath(dirPaths) {
     }
     hideInlineStatus();
 
-    // Remember folders for revert ledger
+    // Remember ALL folders (including intermediates) for revert ledger
     state.pendingCreatedFolders = subfolders.map(rel => {
       return state.selectedFolder
         ? state.selectedFolder + "/" + rel
@@ -1046,7 +1116,7 @@ function clearFiles() {
   state.files = [];
   state.uploadLedger = null;
   state.pendingCreatedFolders = [];
-  btnRevert.classList.add("hidden");
+  exitRevertMode();
   fileListEl.innerHTML = "";
   uploadControls.classList.add("hidden");
   dropZone.classList.remove("hidden");
@@ -1066,7 +1136,7 @@ function startUploadQueue() {
   state.paused = false;
   state.activeUploads = 0;
   state.uploadLedger = null;
-  btnRevert.classList.add("hidden");
+  exitRevertMode();
   btnUpload.classList.add("hidden");
   btnClearFiles.classList.add("hidden");
   btnStop.classList.remove("hidden");
@@ -1224,15 +1294,30 @@ function finishQueue() {
   }
   state.pendingCreatedFolders = [];
 
-  // Show revert button if ledger has content
+  // Switch Upload All button to Revert mode if ledger has content
   if (state.uploadLedger) {
-    btnRevert.classList.remove("hidden");
+    enterRevertMode();
   } else {
-    btnRevert.classList.add("hidden");
+    exitRevertMode();
   }
 
   renderFileList();
   updateCounter();
+}
+
+// ---------- Revert Mode (swaps Upload All button) ----------
+
+function enterRevertMode() {
+  state.revertMode = true;
+  btnUpload.textContent = "Revert Upload";
+  btnUpload.className = "btn btn-revert";
+  btnUpload.classList.remove("hidden");
+}
+
+function exitRevertMode() {
+  state.revertMode = false;
+  btnUpload.textContent = "Upload All";
+  btnUpload.className = "btn btn-primary";
 }
 
 // ---------- Helpers ----------

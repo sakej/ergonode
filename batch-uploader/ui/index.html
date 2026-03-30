@@ -76,7 +76,14 @@
 
       <!-- Drop Zone + File List Card -->
       <section class="card" id="files-card">
-        <h2>Files</h2>
+        <div class="card-header">
+          <h2>Files</h2>
+          <label class="concurrency-toggle" title="Limit to one upload at a time">
+            <input type="checkbox" id="single-connection">
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="toggle-label">Single connection</span>
+          </label>
+        </div>
         <div id="drop-zone" class="drop-zone">
           <div class="drop-zone-content">
             <div class="drop-zone-icon">
@@ -90,6 +97,12 @@
           </div>
         </div>
 
+        <!-- Scanning spinner (centered in files card) -->
+        <div id="scan-spinner" class="scan-spinner hidden">
+          <div class="spinner"></div>
+          <span id="scan-spinner-text">Scanning folders...</span>
+        </div>
+
         <div id="upload-controls" class="hidden">
           <div class="upload-header">
             <div class="upload-summary">
@@ -97,15 +110,9 @@
               <span id="rate-limit-msg" class="rate-limit-msg hidden"></span>
             </div>
             <div class="button-row">
-              <label class="concurrency-toggle" title="Limit to one upload at a time">
-                <input type="checkbox" id="single-connection">
-                <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                <span class="toggle-label">Single connection</span>
-              </label>
-              <button class="btn btn-primary" id="btn-upload">Upload All</button>
-              <button class="btn btn-stop hidden" id="btn-stop">Stop</button>
               <button class="btn btn-ghost" id="btn-clear-files">Clear All</button>
-              <button class="btn btn-revert hidden" id="btn-revert">Revert Upload</button>
+              <button class="btn btn-stop hidden" id="btn-stop">Stop</button>
+              <button class="btn btn-primary" id="btn-upload">Upload All</button>
             </div>
           </div>
           <div id="file-list" class="file-list"></div>
@@ -117,8 +124,20 @@
     <!-- Folder Structure Confirmation Modal -->
     <div id="folder-modal" class="modal-overlay hidden">
       <div class="modal-card">
-        <h3 class="modal-title">Create folder structure?</h3>
+        <h3 class="modal-title">Upload folder?</h3>
         <p id="folder-modal-body" class="modal-body"></p>
+        <div id="folder-modal-options" class="folder-modal-options hidden">
+          <label class="concurrency-toggle" title="Upload all files to destination without creating subfolders">
+            <input type="checkbox" id="flat-upload">
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="toggle-label">Flat upload</span>
+          </label>
+          <label class="concurrency-toggle" title="Create the dropped folder as a parent (e.g. test/electronics/... instead of electronics/...)">
+            <input type="checkbox" id="include-root">
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="toggle-label">Include root folder</span>
+          </label>
+        </div>
         <div class="modal-actions">
           <button class="btn btn-ghost" id="folder-modal-cancel">Cancel</button>
           <button class="btn btn-primary" id="folder-modal-continue">Continue</button>

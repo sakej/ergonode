@@ -622,6 +622,18 @@ input:focus {
   pointer-events: none;
 }
 
+/* ---------- Folder Modal Options ---------- */
+
+.folder-modal-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+}
+
 /* ---------- File List ---------- */
 
 .file-list {
@@ -631,8 +643,7 @@ input:focus {
   flex-direction: column;
   gap: 2px;
   scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
-  transition: scrollbar-color 0.3s;
+  scrollbar-color: #e0e0e0 transparent;
 }
 
 .file-list:hover {
@@ -648,7 +659,7 @@ input:focus {
 }
 
 .file-list::-webkit-scrollbar-thumb {
-  background: transparent;
+  background: #e0e0e0;
   border-radius: 3px;
 }
 
@@ -806,6 +817,36 @@ input:focus {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* ---------- Scan Spinner ---------- */
+
+.scan-spinner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px 16px;
+  flex: 1;
+}
+
+.scan-spinner span {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 /* ---------- Revert ---------- */
