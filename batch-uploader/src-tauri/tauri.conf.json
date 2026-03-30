@@ -30,11 +30,11 @@
     "macOS": {
       "dmg": {
         "appPosition": {
-          "x": 350,
+          "x": 130,
           "y": 120
         },
         "applicationFolderPosition": {
-          "x": 130,
+          "x": 350,
           "y": 120
         },
         "windowSize": {

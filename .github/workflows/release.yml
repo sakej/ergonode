@@ -131,7 +131,7 @@ jobs:
           body: |
             ## Ergonode Batch Uploader ${{ github.event.inputs.version }}
 
-            Desktop app for bulk-uploading images to your Ergonode media library.
+            Desktop app for bulk-uploading files to your Ergonode media library.
 
             ### Downloads
 
@@ -141,6 +141,19 @@ jobs:
             | macOS | `.dmg` | ARM (Apple Silicon) |
             | macOS | `.dmg` | x64 (Intel) |
             | Linux | `.AppImage` or `.deb` | x64 |
+
+            ### macOS: "damaged and can't be opened"
+
+            This build is not signed with an Apple Developer certificate. macOS Gatekeeper will block it by default. To open the app:
+
+            **Option A** — Terminal:
+            ```sh
+            xattr -cr /Applications/"Ergonode Batch Uploader.app"
+            ```
+
+            **Option B** — Right-click the app → Open → Open Anyway
+
+            **Option C** — System Settings → Privacy & Security → "Open Anyway"
 
             ### Requirements
             - An Ergonode instance with API access
