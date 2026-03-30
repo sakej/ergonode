@@ -15,10 +15,6 @@ Built with [Tauri](https://tauri.app/) (Rust backend + vanilla HTML/CSS/JS front
 - **Stop & resume** — cancel uploads mid-flight, retry failed files
 - **Cross-platform** — Windows 10+, macOS, Linux
 
-## Screenshot
-
-![Ergonode Batch Uploader](../docs/screenshot.png)
-
 ## Requirements
 
 - An Ergonode instance with API access
