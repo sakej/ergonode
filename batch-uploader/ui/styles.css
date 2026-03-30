@@ -543,6 +543,24 @@ input:focus {
   font-weight: 500;
 }
 
+/* ---------- Google Drive Link ---------- */
+
+.drive-link {
+  color: var(--accent);
+  font-weight: 600;
+  cursor: pointer;
+  transition: color var(--transition);
+}
+
+.drive-link:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+.drive-separator {
+  color: var(--text-secondary);
+}
+
 /* ---------- Upload Controls ---------- */
 
 .upload-header {

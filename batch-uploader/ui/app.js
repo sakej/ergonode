@@ -144,6 +144,8 @@ const revertFoldersLabel = $("#revert-folders-label");
 const revertFoldersRow   = $("#revert-folders-row");
 const revertModalCancel  = $("#revert-modal-cancel");
 const revertModalConfirm = $("#revert-modal-confirm");
+const driveLink          = $("#drive-link");
+const driveLinkSeparator = $("#drive-link-separator");
 
 // ---------- Init ----------
 
@@ -156,6 +158,15 @@ async function init() {
   } catch (_) {
     // No saved settings — that's fine
   }
+  // Check if Google Drive is available (Client ID embedded at build time)
+  try {
+    const driveAvailable = await invoke("is_google_drive_available");
+    if (driveAvailable) {
+      driveLink.classList.remove("hidden");
+      driveLinkSeparator.classList.remove("hidden");
+    }
+  } catch (_) {}
+
   bindEvents();
   setupDragDrop();
 }
@@ -192,6 +203,12 @@ function bindEvents() {
 
   // Drop zone click -> file picker
   dropZone.addEventListener("click", handleFilePicker);
+
+  // Google Drive link
+  driveLink.addEventListener("click", (e) => {
+    e.stopPropagation(); // Don't trigger dropZone click
+    handleGoogleDrivePicker();
+  });
 
   // Upload controls
   btnUpload.addEventListener("click", () => {
@@ -981,6 +998,146 @@ async function addFoldersByPath(dirPaths) {
   updateCounter();
 }
 
+// ---------- Google Drive Import ----------
+
+async function handleGoogleDrivePicker() {
+  // Show spinner
+  dropZone.classList.add("hidden");
+  scanSpinner.classList.remove("hidden");
+  scanSpinnerText.textContent = "Waiting for Google authorization...";
+
+  let result;
+  try {
+    result = await invoke("google_drive_pick_files");
+  } catch (err) {
+    scanSpinner.classList.add("hidden");
+    dropZone.classList.remove("hidden");
+    showInlineError("Google Drive: " + err);
+    return;
+  }
+
+  const driveFiles = result.files;
+  const accessToken = result.access_token;
+
+  if (!driveFiles || driveFiles.length === 0) {
+    scanSpinner.classList.add("hidden");
+    dropZone.classList.remove("hidden");
+    return;
+  }
+
+  scanSpinnerText.textContent = `Found ${driveFiles.length} file(s) from Google Drive`;
+
+  // Check if any files have folder structure
+  const hasStructure = driveFiles.some(f => f.relative_dir.length > 0);
+
+  scanSpinner.classList.add("hidden");
+  uploadControls.classList.remove("hidden");
+
+  if (hasStructure) {
+    // Show folder modal with options (reuse existing modal)
+    folderModalOptions.classList.remove("hidden");
+
+    const destName = state.selectedFolder
+      ? state.selectedFolder.split("/").pop()
+      : "/ (root)";
+
+    const subfolderCount = new Set(
+      driveFiles.map(f => f.relative_dir).filter(d => d.length > 0)
+    ).size;
+
+    const msg = `${driveFiles.length} file(s) from Google Drive will be uploaded to "${destName}".\n\n${subfolderCount} subfolder(s) detected.`;
+    const confirmed = await showFolderModal(msg);
+    if (!confirmed) {
+      resetDropState();
+      return;
+    }
+
+    // Read toggles after confirmation
+    const includeRoot = includeRootEl.checked;
+    const flatUpload = flatUploadEl.checked;
+
+    // Apply flat upload — clear relative_dirs
+    if (flatUpload && !includeRoot) {
+      for (const f of driveFiles) f.relative_dir = "";
+    } else if (flatUpload && includeRoot) {
+      // Keep only root folder name (first segment)
+      for (const f of driveFiles) {
+        const root = f.relative_dir.split("/")[0];
+        f.relative_dir = root || "";
+      }
+    }
+    // includeRoot without flat: relative_dirs already have folder names from Rust
+
+    // Collect subfolders and create in Ergonode
+    const leafDirs = new Set(
+      driveFiles.map(f => f.relative_dir).filter(d => d.length > 0)
+    );
+    const allPaths = new Set();
+    for (const leaf of leafDirs) {
+      const parts = leaf.split("/");
+      for (let i = 1; i <= parts.length; i++) {
+        allPaths.add(parts.slice(0, i).join("/"));
+      }
+    }
+    const subfolders = [...allPaths];
+
+    if (subfolders.length > 0) {
+      showInlineStatus(`Creating ${subfolders.length} folder(s) in Ergonode...`);
+      try {
+        await invoke("create_folders_batch", {
+          apiUrl: state.apiUrl,
+          apiKey: state.apiKey,
+          basePath: state.selectedFolder || null,
+          relativePaths: subfolders,
+        });
+      } catch (err) {
+        showInlineError("Failed to create folders: " + err);
+        return;
+      }
+      hideInlineStatus();
+
+      state.pendingCreatedFolders = subfolders.map(rel =>
+        state.selectedFolder ? state.selectedFolder + "/" + rel : rel
+      );
+    }
+  } else {
+    folderModalOptions.classList.add("hidden");
+  }
+
+  // Queue files — download from Drive on upload (lazy download)
+  for (const driveFile of driveFiles) {
+    let targetFolder = null;
+    if (driveFile.relative_dir) {
+      targetFolder = state.selectedFolder
+        ? state.selectedFolder + "/" + driveFile.relative_dir
+        : driveFile.relative_dir;
+    } else {
+      targetFolder = state.selectedFolder || null;
+    }
+
+    const file = {
+      id: state.nextFileId++,
+      name: driveFile.name,
+      path: "",                     // filled after download
+      status: driveFile.size > MAX_FILE_SIZE ? "skipped" : "queued",
+      error: driveFile.size > MAX_FILE_SIZE ? "File exceeds 100 MB limit" : null,
+      targetFolder,
+      relativeDir: driveFile.relative_dir,
+      // Drive-specific fields
+      driveFileId: driveFile.id,
+      driveAccessToken: accessToken,
+      isTempFile: false,
+      tempPath: null,
+    };
+
+    state.files.push(file);
+  }
+
+  renderFileList();
+  updateCounter();
+  dropZone.classList.add("hidden");
+}
+
 // ---------- File List Rendering ----------
 
 function renderFileList() {
@@ -1113,6 +1270,12 @@ function updateCounter() {
 
 function clearFiles() {
   if (state.uploading) return;
+  // Clean up any remaining Drive temp files
+  for (const file of state.files) {
+    if (file.isTempFile && file.tempPath) {
+      invoke("google_drive_delete_temp", { path: file.tempPath }).catch(() => {});
+    }
+  }
   state.files = [];
   state.uploadLedger = null;
   state.pendingCreatedFolders = [];
@@ -1178,6 +1341,28 @@ function pumpQueue() {
 }
 
 async function uploadSingleFile(file) {
+  // Download Drive files first
+  if (file.driveFileId && !file.isTempFile) {
+    try {
+      const tempPath = await invoke("google_drive_download", {
+        accessToken: file.driveAccessToken,
+        fileId: file.driveFileId,
+        fileName: file.name,
+      });
+      file.path = tempPath;
+      file.tempPath = tempPath;
+      file.isTempFile = true;
+    } catch (err) {
+      file.status = "failed";
+      file.error = "Drive download failed: " + err;
+      state.activeUploads--;
+      updateFileRow(file);
+      updateCounter();
+      pumpQueue();
+      return;
+    }
+  }
+
   try {
     const result = await invoke("upload_file", {
       apiUrl: state.apiUrl,
@@ -1200,6 +1385,11 @@ async function uploadSingleFile(file) {
       file.status = "done";
       file.error = null;
       state.consecutiveSuccess++;
+      // Clean up temp file for Drive downloads
+      if (file.isTempFile && file.tempPath) {
+        invoke("google_drive_delete_temp", { path: file.tempPath }).catch(() => {});
+        file.tempPath = null;
+      }
       updateFileRow(file);
 
       // After 10 consecutive successes, boost concurrency
