@@ -1,33 +1,37 @@
-Ergonode Community Tools License
+Free Use License and Commercial Embedding License
 
 Copyright (c) 2026 Marcin Krasicki
 
+FREE USE
+
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to use,
-copy, and modify the Software for personal, internal, or non-commercial
-purposes, subject to the following conditions:
+copy, modify, and share the Software without restriction for any purpose,
+including personal, internal, educational, and commercial use within your
+own organization.
 
-1. FREE USE. You may freely use, copy, and modify the Software for any
-   purpose that does not generate revenue, including personal projects,
-   internal company use, education, and evaluation.
+COMMERCIAL EMBEDDING LICENSE REQUIRED
 
-2. COMMERCIAL USE REQUIRES A LICENSE. A separate commercial license is
-   required if you:
-   (a) Include the Software, in whole or in part, in a product or service
-       that is sold, licensed, or otherwise distributed for a fee;
-   (b) Use the Software as part of a paid service or offering;
-   (c) Distribute the Software as part of a commercial product.
+A separate commercial license is required if you:
 
-   To obtain a commercial license, contact: marcin@krasicki.dev
+  (a) Embed, bundle, or redistribute the Software (in whole or substantial
+      part) as a component of a product or service you sell;
+  (b) Offer the Software's functionality as part of a managed service, SaaS
+      platform, IDE extension, or competing plugin;
+  (c) Redistribute the Software under a different name or brand.
 
-3. ATTRIBUTION. Redistributions of the Software, whether modified or
-   unmodified, must retain this license notice and the above copyright
-   notice.
+For commercial embedding inquiries, contact: marcin@krasicki.dev
 
-4. NO WARRANTY. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
-   KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-   IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-   FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-   DEALINGS IN THE SOFTWARE.
+ATTRIBUTION
+
+Redistributions of the Software, whether modified or unmodified, must retain
+this license notice and the above copyright notice.
+
+NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

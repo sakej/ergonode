@@ -10,4 +10,4 @@ A collection of open-source tools and utilities for [Ergonode](https://ergonode.
 
 ## License
 
-Free to use for personal and non-commercial purposes. Commercial use requires a license. See [LICENSE](LICENSE) for details.
+Free to use, copy, modify, and share for any purpose. A commercial embedding license is required if you bundle, redistribute, or rebrand the software as part of a product you sell. See [LICENSE](LICENSE) for details.
