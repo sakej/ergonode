@@ -1,6 +1,7 @@
 mod config;
 mod ergonode;
 mod fs_utils;
+mod google_drive;
 
 use config::AppConfig;
 use ergonode::{ErgonodeClient, FolderInfo, UploadResult, BatchDeleteResult};
@@ -90,13 +91,24 @@ async fn batch_delete(
     client.batch_delete(&paths, &delete_type).await
 }
 
+#[tauri::command]
+fn is_google_drive_available() -> bool {
+    google_drive::is_available()
+}
+
+#[tauri::command]
+async fn google_drive_pick_files() -> Result<Vec<google_drive::DriveFileInfo>, String> {
+    google_drive::pick_and_list_files().await
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             load_settings, save_settings, clear_settings,
             test_connection, fetch_folders, create_folder, upload_file, get_file_size,
-            scan_directory, is_directory, create_folders_batch, batch_delete
+            scan_directory, is_directory, create_folders_batch, batch_delete,
+            is_google_drive_available, google_drive_pick_files
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
