@@ -511,6 +511,8 @@ async function addFilesByPath(paths) {
       path: filePath,
       status: "queued",
       error: null,
+      targetFolder: null,   // null = use state.selectedFolder
+      relativeDir: "",      // "" = no subfolder
     };
 
     // Check file size
@@ -547,6 +549,15 @@ function renderFileList() {
     const row = document.createElement("div");
     row.className = "file-item";
     row.id = "file-" + file.id;
+
+    // Relative directory prefix (for folder drops)
+    if (file.relativeDir) {
+      const pathEl = document.createElement("span");
+      pathEl.className = "file-relative-dir";
+      pathEl.textContent = file.relativeDir + "/";
+      pathEl.title = file.relativeDir + "/" + file.name;
+      row.appendChild(pathEl);
+    }
 
     // File name
     const nameEl = document.createElement("span");
@@ -721,7 +732,7 @@ async function uploadSingleFile(file) {
       apiKey: state.apiKey,
       filePath: file.path,
       fileName: file.name,
-      folderPath: state.selectedFolder,
+      folderPath: file.targetFolder !== null ? file.targetFolder : state.selectedFolder,
     });
 
     if (result.rate_limited) {

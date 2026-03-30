@@ -671,6 +671,16 @@ input:focus {
   background: #ebeef2;
 }
 
+.file-relative-dir {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 80px;
+  flex-shrink: 0;
+}
+
 .file-name {
   flex: 1;
   overflow: hidden;

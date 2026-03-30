@@ -255,6 +255,48 @@ impl ErgonodeClient {
         Ok(())
     }
 
+    /// Create multiple folders in order. "Already exists" errors are treated as success.
+    /// `base_path` is the currently selected Ergonode folder (None = root).
+    /// `relative_paths` is a list like ["winter", "winter/photos", "summer"].
+    pub async fn create_folders_batch(
+        &self,
+        base_path: Option<&str>,
+        relative_paths: &[String],
+    ) -> Result<(), String> {
+        // Sort by depth (parents first)
+        let mut sorted = relative_paths.to_vec();
+        sorted.sort_by_key(|p| p.chars().filter(|&c| c == '/').count());
+        sorted.dedup();
+
+        for rel_path in &sorted {
+            // Build the full Ergonode path: base_path + "/" + rel_path
+            let full_path = match base_path {
+                Some(b) if !b.is_empty() => format!("{b}/{rel_path}"),
+                _ => rel_path.clone(),
+            };
+
+            // Split into parent path and folder name
+            let (parent, name) = if let Some(idx) = full_path.rfind('/') {
+                (Some(&full_path[..idx]), &full_path[idx + 1..])
+            } else {
+                (None, full_path.as_str())
+            };
+
+            match self.create_folder(name, parent).await {
+                Ok(_) => {}
+                Err(e) => {
+                    // "Folder already exists" UUID — treat as success
+                    if e.contains("54c25a35") {
+                        continue;
+                    }
+                    return Err(format!("Failed to create folder '{full_path}': {e}"));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Upload a file via multipart POST (multimediaCreate mutation).
     pub async fn upload_file(
         &self,

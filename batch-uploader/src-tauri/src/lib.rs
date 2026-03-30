@@ -1,5 +1,6 @@
 mod config;
 mod ergonode;
+mod fs_utils;
 
 use config::AppConfig;
 use ergonode::{ErgonodeClient, FolderInfo, UploadResult};
@@ -51,12 +52,40 @@ fn get_file_size(path: String) -> Result<u64, String> {
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn scan_directory(path: String) -> Result<Vec<fs_utils::ScannedFile>, String> {
+    let p = std::path::Path::new(&path);
+    if !p.is_dir() {
+        return Err(format!("{} is not a directory", path));
+    }
+    fs_utils::scan_dir(p, p)
+}
+
+#[tauri::command]
+fn is_directory(path: String) -> bool {
+    std::path::Path::new(&path).is_dir()
+}
+
+#[tauri::command]
+async fn create_folders_batch(
+    api_url: String,
+    api_key: String,
+    base_path: Option<String>,
+    relative_paths: Vec<String>,
+) -> Result<(), String> {
+    let client = ErgonodeClient::new(&api_url, &api_key);
+    client
+        .create_folders_batch(base_path.as_deref(), &relative_paths)
+        .await
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             load_settings, save_settings, clear_settings,
-            test_connection, fetch_folders, create_folder, upload_file, get_file_size
+            test_connection, fetch_folders, create_folder, upload_file, get_file_size,
+            scan_directory, is_directory, create_folders_batch
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
