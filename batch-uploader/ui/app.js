@@ -118,9 +118,10 @@ const uploadControls  = $("#upload-controls");
 const fileListEl      = $("#file-list");
 const uploadCounter   = $("#upload-counter");
 const rateLimitMsg    = $("#rate-limit-msg");
-const btnUpload       = $("#btn-upload");
-const btnStop         = $("#btn-stop");
-const btnClearFiles   = $("#btn-clear-files");
+const btnUpload         = $("#btn-upload");
+const btnStop           = $("#btn-stop");
+const btnClearFiles     = $("#btn-clear-files");
+const singleConnectionEl = $("#single-connection");
 
 // ---------- Init ----------
 
@@ -174,6 +175,20 @@ function bindEvents() {
   btnUpload.addEventListener("click", startUploadQueue);
   btnStop.addEventListener("click", stopUploadQueue);
   btnClearFiles.addEventListener("click", clearFiles);
+
+  // Single connection toggle
+  const savedSingle = localStorage.getItem("singleConnection") === "true";
+  singleConnectionEl.checked = savedSingle;
+  if (savedSingle) {
+    state.maxConcurrency = 1;
+    state.concurrency = 1;
+  }
+  singleConnectionEl.addEventListener("change", () => {
+    const single = singleConnectionEl.checked;
+    localStorage.setItem("singleConnection", single);
+    state.maxConcurrency = single ? 1 : 4;
+    state.concurrency = single ? 1 : 4;
+  });
 }
 
 // ---------- Drag & Drop (Tauri native) ----------
@@ -663,6 +678,7 @@ function startUploadQueue() {
   btnClearFiles.classList.add("hidden");
   btnStop.classList.remove("hidden");
   rateLimitMsg.classList.add("hidden");
+  singleConnectionEl.closest(".concurrency-toggle").classList.add("disabled");
 
   pumpQueue();
 }
@@ -798,6 +814,7 @@ function finishQueue() {
   btnStop.disabled = false;
   btnStop.textContent = "Stop";
   rateLimitMsg.classList.add("hidden");
+  singleConnectionEl.closest(".concurrency-toggle").classList.remove("disabled");
   renderFileList();
   updateCounter();
 }

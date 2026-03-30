@@ -568,6 +568,60 @@ input:focus {
   font-size: 12px;
 }
 
+.concurrency-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  margin-top: 2px;
+}
+
+.concurrency-toggle input[type="checkbox"] {
+  display: none;
+}
+
+.toggle-track {
+  width: 28px;
+  height: 16px;
+  background: var(--border);
+  border-radius: 8px;
+  position: relative;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.concurrency-toggle input:checked + .toggle-track {
+  background: var(--accent);
+}
+
+.toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  background: white;
+  border-radius: 50%;
+  transition: left 0.2s;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+
+.concurrency-toggle input:checked + .toggle-track .toggle-thumb {
+  left: 14px;
+}
+
+.toggle-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.concurrency-toggle.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 /* ---------- File List ---------- */
 
 .file-list {

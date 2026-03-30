@@ -95,6 +95,11 @@
             <div class="upload-summary">
               <span id="upload-counter">0 / 0 complete</span>
               <span id="rate-limit-msg" class="rate-limit-msg hidden"></span>
+              <label class="concurrency-toggle" title="Limit to one upload at a time">
+                <input type="checkbox" id="single-connection">
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                <span class="toggle-label">Single connection</span>
+              </label>
             </div>
             <div class="button-row">
               <button class="btn btn-primary" id="btn-upload">Upload All</button>
