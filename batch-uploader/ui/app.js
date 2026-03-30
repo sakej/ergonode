@@ -130,6 +130,15 @@ const folderModal         = $("#folder-modal");
 const folderModalBody     = $("#folder-modal-body");
 const folderModalCancel   = $("#folder-modal-cancel");
 const folderModalContinue = $("#folder-modal-continue");
+const btnRevert          = $("#btn-revert");
+const revertModal        = $("#revert-modal");
+const revertFilesCheck   = $("#revert-files-check");
+const revertFoldersCheck = $("#revert-folders-check");
+const revertFilesLabel   = $("#revert-files-label");
+const revertFoldersLabel = $("#revert-folders-label");
+const revertFoldersRow   = $("#revert-folders-row");
+const revertModalCancel  = $("#revert-modal-cancel");
+const revertModalConfirm = $("#revert-modal-confirm");
 
 // ---------- Init ----------
 
@@ -183,6 +192,7 @@ function bindEvents() {
   btnUpload.addEventListener("click", startUploadQueue);
   btnStop.addEventListener("click", stopUploadQueue);
   btnClearFiles.addEventListener("click", clearFiles);
+  btnRevert.addEventListener("click", handleRevert);
 
   // Single connection toggle
   const savedSingle = localStorage.getItem("singleConnection") === "true";
@@ -221,6 +231,176 @@ function showFolderModal(message) {
     folderModalContinue.addEventListener("click", onContinue, { once: true });
     folderModalCancel.addEventListener("click", onCancel, { once: true });
   });
+}
+
+// ---------- Revert Modal ----------
+
+function showRevertModal() {
+  return new Promise((resolve) => {
+    const ledger = state.uploadLedger;
+    if (!ledger) { resolve(null); return; }
+
+    revertFilesLabel.textContent = `Delete uploaded files (${ledger.uploadedFiles.length})`;
+    revertFoldersLabel.textContent = `Delete created folders (${ledger.createdFolders.length})`;
+
+    // Only show folders checkbox if folders were created
+    if (ledger.createdFolders.length === 0) {
+      revertFoldersRow.classList.add("hidden");
+      revertFoldersCheck.checked = false;
+    } else {
+      revertFoldersRow.classList.remove("hidden");
+      revertFoldersCheck.checked = true;
+    }
+    revertFilesCheck.checked = true;
+
+    revertModal.classList.remove("hidden");
+
+    const cleanup = () => {
+      revertModal.classList.add("hidden");
+      revertModalConfirm.removeEventListener("click", onConfirm);
+      revertModalCancel.removeEventListener("click", onCancel);
+    };
+
+    const onConfirm = () => {
+      cleanup();
+      resolve({
+        deleteFiles: revertFilesCheck.checked,
+        deleteFolders: revertFoldersCheck.checked,
+      });
+    };
+    const onCancel = () => {
+      cleanup();
+      resolve(null);
+    };
+
+    revertModalConfirm.addEventListener("click", onConfirm, { once: true });
+    revertModalCancel.addEventListener("click", onCancel, { once: true });
+  });
+}
+
+const DELETE_BATCH_SIZE = 50;
+
+async function handleRevert() {
+  const choice = await showRevertModal();
+  if (!choice || (!choice.deleteFiles && !choice.deleteFolders)) return;
+
+  const ledger = state.uploadLedger;
+  if (!ledger) return;
+
+  // Disable buttons during revert
+  btnRevert.disabled = true;
+  btnUpload.disabled = true;
+  btnClearFiles.disabled = true;
+
+  const summary = { filesOk: 0, filesFail: 0, foldersOk: 0, foldersFail: 0, errors: [] };
+
+  // Phase 1: Delete files
+  if (choice.deleteFiles && ledger.uploadedFiles.length > 0) {
+    const filePaths = ledger.uploadedFiles.map(f => {
+      return f.folderPath ? f.folderPath + "/" + f.name : f.name;
+    });
+
+    for (let i = 0; i < filePaths.length; i += DELETE_BATCH_SIZE) {
+      const batch = filePaths.slice(i, i + DELETE_BATCH_SIZE);
+      showInlineStatus(`Deleting files... ${i}/${filePaths.length}`);
+
+      try {
+        const result = await invoke("batch_delete", {
+          apiUrl: state.apiUrl,
+          apiKey: state.apiKey,
+          paths: batch,
+          deleteType: "file",
+        });
+
+        for (const r of result.results) {
+          if (r.success) {
+            summary.filesOk++;
+            // Mark file as reverted in the file list
+            const match = state.files.find(f =>
+              f.status === "done" && f.name === r.path.split("/").pop()
+            );
+            if (match) {
+              match.status = "reverted";
+              updateFileRow(match);
+            }
+          } else {
+            summary.filesFail++;
+            summary.errors.push(`${r.path}: ${r.error}`);
+          }
+        }
+      } catch (err) {
+        summary.filesFail += batch.length;
+        summary.errors.push(`Batch error: ${err}`);
+      }
+    }
+    showInlineStatus(`Deleting files... ${filePaths.length}/${filePaths.length}`);
+  }
+
+  // Phase 2: Delete folders (deepest first)
+  if (choice.deleteFolders && ledger.createdFolders.length > 0) {
+    // Sort by depth descending (deepest first)
+    const sorted = [...ledger.createdFolders].sort((a, b) => {
+      const depthA = a.split("/").length;
+      const depthB = b.split("/").length;
+      return depthB - depthA;
+    });
+
+    for (let i = 0; i < sorted.length; i += DELETE_BATCH_SIZE) {
+      const batch = sorted.slice(i, i + DELETE_BATCH_SIZE);
+      showInlineStatus(`Deleting folders... ${i}/${sorted.length}`);
+
+      try {
+        const result = await invoke("batch_delete", {
+          apiUrl: state.apiUrl,
+          apiKey: state.apiKey,
+          paths: batch,
+          deleteType: "folder",
+        });
+
+        for (const r of result.results) {
+          if (r.success) {
+            summary.foldersOk++;
+          } else {
+            summary.foldersFail++;
+            summary.errors.push(`${r.path}: ${r.error}`);
+          }
+        }
+      } catch (err) {
+        summary.foldersFail += batch.length;
+        summary.errors.push(`Batch error: ${err}`);
+      }
+    }
+  }
+
+  // Phase 3: Show summary
+  const parts = [];
+  if (choice.deleteFiles) parts.push(`${summary.filesOk}/${summary.filesOk + summary.filesFail} files deleted`);
+  if (choice.deleteFolders) parts.push(`${summary.foldersOk}/${summary.foldersOk + summary.foldersFail} folders deleted`);
+  const msg = "Reverted: " + parts.join(", ");
+
+  if (summary.filesFail === 0 && summary.foldersFail === 0) {
+    showInlineStatus(msg);
+    rateLimitMsg.style.color = "var(--green)";
+  } else {
+    showInlineError(msg);
+    console.warn("[revert] Failures:", summary.errors);
+    // Show details in a title tooltip on the status message
+    rateLimitMsg.title = summary.errors.join("\n");
+  }
+
+  // Clear ledger and re-enable buttons
+  state.uploadLedger = null;
+  btnRevert.classList.add("hidden");
+  btnRevert.disabled = false;
+  btnUpload.disabled = false;
+  btnClearFiles.disabled = false;
+  renderFileList();
+  updateCounter();
+
+  // Refresh folder tree if folders were deleted
+  if (choice.deleteFolders) {
+    await loadFolders();
+  }
 }
 
 // ---------- Drag & Drop (Tauri native) ----------
@@ -824,6 +1004,7 @@ function statusLabel(file) {
     case "done":       return "Done";
     case "failed":     return file.error || "Failed";
     case "skipped":    return file.error || "Skipped";
+    case "reverted":   return "Reverted";
     default:           return file.status;
   }
 }
@@ -856,6 +1037,9 @@ function updateCounter() {
 function clearFiles() {
   if (state.uploading) return;
   state.files = [];
+  state.uploadLedger = null;
+  state.pendingCreatedFolders = [];
+  btnRevert.classList.add("hidden");
   fileListEl.innerHTML = "";
   uploadControls.classList.add("hidden");
   dropZone.classList.remove("hidden");
@@ -875,6 +1059,7 @@ function startUploadQueue() {
   state.paused = false;
   state.activeUploads = 0;
   state.uploadLedger = null;
+  btnRevert.classList.add("hidden");
   btnUpload.classList.add("hidden");
   btnClearFiles.classList.add("hidden");
   btnStop.classList.remove("hidden");
@@ -1031,6 +1216,13 @@ function finishQueue() {
     state.uploadLedger = null;
   }
   state.pendingCreatedFolders = [];
+
+  // Show revert button if ledger has content
+  if (state.uploadLedger) {
+    btnRevert.classList.remove("hidden");
+  } else {
+    btnRevert.classList.add("hidden");
+  }
 
   renderFileList();
   updateCounter();
