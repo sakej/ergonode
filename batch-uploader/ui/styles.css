@@ -807,3 +807,45 @@ input:focus {
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* ---------- Revert ---------- */
+
+.btn-revert {
+  background: var(--red-subtle);
+  color: var(--red);
+  border: 1px solid #fecaca;
+}
+
+.btn-revert:hover:not(:disabled) {
+  background: #fecaca;
+}
+
+.revert-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.revert-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.revert-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--red);
+  cursor: pointer;
+}
+
+.file-progress-bar.reverted {
+  background: var(--text-tertiary);
+  width: 100%;
+}
+
+.file-status.reverted { color: var(--text-tertiary); }
