@@ -5,9 +5,11 @@ use std::path::Path;
 pub struct ScannedFile {
     pub name: String,
     pub absolute_path: String,
-    /// Path relative to the dropped folder root, e.g. "winter/photos/img.jpg"
+    /// Path relative to the dropped folder root, e.g. "winter/photos"
     /// Empty string if the file is directly in the dropped folder (no subfolder).
     pub relative_dir: String,
+    /// File size in bytes.
+    pub size: u64,
 }
 
 /// Recursively walk `dir`, returning all files.
@@ -53,10 +55,13 @@ fn scan_recursive(dir: &Path, root: &Path, results: &mut Vec<ScannedFile>) -> Re
                 .unwrap_or_default()
                 .to_string();
 
+            let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+
             results.push(ScannedFile {
                 name,
                 absolute_path: path.to_string_lossy().to_string(),
                 relative_dir,
+                size,
             });
         }
     }

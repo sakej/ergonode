@@ -243,11 +243,8 @@ impl ErgonodeClient {
         if let Some(errors) = body.get("errors") {
             if let Some(arr) = errors.as_array() {
                 if !arr.is_empty() {
-                    let msg = arr[0]
-                        .get("message")
-                        .and_then(|m| m.as_str())
-                        .unwrap_or("Unknown error");
-                    return Err(format!("API error: {msg}"));
+                    // Return the full raw JSON so callers can match on error codes (UUIDs)
+                    return Err(arr[0].to_string());
                 }
             }
         }

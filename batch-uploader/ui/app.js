@@ -122,6 +122,10 @@ const btnUpload         = $("#btn-upload");
 const btnStop           = $("#btn-stop");
 const btnClearFiles     = $("#btn-clear-files");
 const singleConnectionEl = $("#single-connection");
+const folderModal         = $("#folder-modal");
+const folderModalBody     = $("#folder-modal-body");
+const folderModalCancel   = $("#folder-modal-cancel");
+const folderModalContinue = $("#folder-modal-continue");
 
 // ---------- Init ----------
 
@@ -191,6 +195,30 @@ function bindEvents() {
   });
 }
 
+// ---------- Folder Modal ----------
+
+// Returns a Promise<boolean> — true if user clicked Continue, false if Cancel
+function showFolderModal(message) {
+  return new Promise((resolve) => {
+    folderModalBody.textContent = message;
+    folderModal.classList.remove("hidden");
+
+    const onContinue = () => {
+      folderModal.classList.add("hidden");
+      folderModalCancel.removeEventListener("click", onCancel);
+      resolve(true);
+    };
+    const onCancel = () => {
+      folderModal.classList.add("hidden");
+      folderModalContinue.removeEventListener("click", onContinue);
+      resolve(false);
+    };
+
+    folderModalContinue.addEventListener("click", onContinue, { once: true });
+    folderModalCancel.addEventListener("click", onCancel, { once: true });
+  });
+}
+
 // ---------- Drag & Drop (Tauri native) ----------
 
 function setupDragDrop() {
@@ -211,9 +239,19 @@ function setupDragDrop() {
   listen("tauri://drag-drop", async (event) => {
     dropZone.classList.remove("drag-over");
     const paths = event.payload.paths || event.payload;
-    if (Array.isArray(paths) && paths.length > 0) {
-      await addFilesByPath(paths);
+    if (!Array.isArray(paths) || paths.length === 0) return;
+
+    // Separate files from directories
+    const dirs = [];
+    const files = [];
+    for (const p of paths) {
+      const isDir = await invoke("is_directory", { path: p });
+      if (isDir) dirs.push(p);
+      else files.push(p);
     }
+
+    if (dirs.length > 0) await addFoldersByPath(dirs);
+    if (files.length > 0) await addFilesByPath(files);
   });
 
   // Also listen for drag-enter/drag-over for visual feedback via Tauri events
@@ -533,6 +571,144 @@ async function addFilesByPath(paths) {
   renderFileList();
   uploadControls.classList.remove("hidden");
   dropZone.classList.add("hidden");
+}
+
+function showInlineStatus(msg) {
+  rateLimitMsg.textContent = msg;
+  rateLimitMsg.className = "rate-limit-msg";
+  rateLimitMsg.style.color = "";
+  rateLimitMsg.classList.remove("hidden");
+  console.log("[folder-drop]", msg);
+}
+
+function hideInlineStatus() {
+  rateLimitMsg.classList.add("hidden");
+  rateLimitMsg.style.color = "";
+}
+
+function showInlineError(msg) {
+  rateLimitMsg.textContent = msg;
+  rateLimitMsg.className = "rate-limit-msg";
+  rateLimitMsg.style.color = "var(--red)";
+  rateLimitMsg.classList.remove("hidden");
+  console.error("[folder-drop]", msg);
+}
+
+function resetDropState() {
+  if (state.files.length === 0) {
+    uploadControls.classList.add("hidden");
+    dropZone.classList.remove("hidden");
+  }
+}
+
+async function addFoldersByPath(dirPaths) {
+  // Show scanning indicator immediately
+  dropZone.classList.add("hidden");
+  uploadControls.classList.remove("hidden");
+  showInlineStatus("Scanning folders...");
+
+  // Scan all dropped directories
+  let allScanned = [];
+  for (const dirPath of dirPaths) {
+    try {
+      const scanned = await invoke("scan_directory", { path: dirPath });
+      allScanned = allScanned.concat(scanned);
+      showInlineStatus(`Scanning... ${allScanned.length} files found`);
+    } catch (err) {
+      hideInlineStatus();
+      showInlineError("Failed to read folder: " + err);
+      resetDropState();
+      return;
+    }
+  }
+
+  if (allScanned.length === 0) {
+    hideInlineStatus();
+    resetDropState();
+    return;
+  }
+
+  hideInlineStatus();
+
+  // Collect unique relative subfolder paths (non-empty)
+  const subfolders = [...new Set(
+    allScanned
+      .map(f => f.relative_dir)
+      .filter(d => d.length > 0)
+  )];
+
+  // Compute display destination
+  const destName = state.selectedFolder
+    ? state.selectedFolder.split("/").pop()
+    : "/ (root)";
+
+  // Build modal message
+  let msg = `This will create the folder structure inside "${destName}".`;
+  if (subfolders.length > 0) msg += `\n\n${subfolders.length} subfolder(s) and `;
+  else msg += `\n\n`;
+  msg += `${allScanned.length} file(s) will be uploaded.`;
+
+  console.log("[folder-drop] Scanned:", allScanned.length, "files,", subfolders.length, "subfolders");
+
+  const confirmed = await showFolderModal(msg);
+  if (!confirmed) {
+    resetDropState();
+    return;
+  }
+
+  // Create folders in Ergonode pre-flight
+  if (subfolders.length > 0) {
+    showInlineStatus(`Creating ${subfolders.length} folder(s) in Ergonode...`);
+    console.log("[folder-drop] Creating folders:", subfolders);
+    try {
+      await invoke("create_folders_batch", {
+        apiUrl: state.apiUrl,
+        apiKey: state.apiKey,
+        basePath: state.selectedFolder || null,
+        relativePaths: subfolders,
+      });
+      console.log("[folder-drop] Folders created successfully");
+    } catch (err) {
+      showInlineError("Failed to create folders: " + err);
+      return;
+    }
+    hideInlineStatus();
+  }
+
+  // Add all files at once (size already included from Rust scan)
+  console.log("[folder-drop] Queuing", allScanned.length, "files...");
+  for (const scanned of allScanned) {
+    if (state.files.some(f => f.path === scanned.absolute_path)) continue;
+
+    let targetFolder = null;
+    if (scanned.relative_dir) {
+      targetFolder = state.selectedFolder
+        ? state.selectedFolder + "/" + scanned.relative_dir
+        : scanned.relative_dir;
+    } else {
+      targetFolder = state.selectedFolder || null;
+    }
+
+    const file = {
+      id: state.nextFileId++,
+      name: scanned.name,
+      path: scanned.absolute_path,
+      status: "queued",
+      error: null,
+      targetFolder,
+      relativeDir: scanned.relative_dir,
+    };
+
+    if (scanned.size > MAX_FILE_SIZE) {
+      file.status = "skipped";
+      file.error = "File exceeds 100 MB limit";
+    }
+
+    state.files.push(file);
+  }
+
+  renderFileList();
+  updateCounter();
 }
 
 // ---------- File List Rendering ----------
