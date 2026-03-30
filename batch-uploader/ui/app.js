@@ -27,6 +27,10 @@ const state = {
   consecutiveSuccess: 0,
   paused: false,
   pauseTimer: null,
+
+  // Revert ledger (session-scoped)
+  uploadLedger: null,       // { uploadedFiles: [{name, folderPath}], createdFolders: [path] }
+  pendingCreatedFolders: [], // temp: folders created in pre-flight, moved to ledger after upload
 };
 
 const MAX_FILE_SIZE = 104857600; // 100 MB
@@ -318,6 +322,8 @@ function handleDisconnect() {
 }
 
 function resetToDisconnected() {
+  state.uploadLedger = null;
+  state.pendingCreatedFolders = [];
   state.apiUrl = "";
   state.apiKey = "";
   state.connected = false;
@@ -673,6 +679,13 @@ async function addFoldersByPath(dirPaths) {
       return;
     }
     hideInlineStatus();
+
+    // Remember folders for revert ledger
+    state.pendingCreatedFolders = subfolders.map(rel => {
+      return state.selectedFolder
+        ? state.selectedFolder + "/" + rel
+        : rel;
+    });
   }
 
   // Add all files at once (size already included from Rust scan)
@@ -861,6 +874,7 @@ function startUploadQueue() {
   state.stopping = false;
   state.paused = false;
   state.activeUploads = 0;
+  state.uploadLedger = null;
   btnUpload.classList.add("hidden");
   btnClearFiles.classList.add("hidden");
   btnStop.classList.remove("hidden");
@@ -1002,6 +1016,22 @@ function finishQueue() {
   btnStop.textContent = "Stop";
   rateLimitMsg.classList.add("hidden");
   singleConnectionEl.closest(".concurrency-toggle").classList.remove("disabled");
+
+  // Build revert ledger from successfully uploaded files
+  const doneFiles = state.files.filter(f => f.status === "done");
+  if (doneFiles.length > 0) {
+    state.uploadLedger = {
+      uploadedFiles: doneFiles.map(f => ({
+        name: f.name,
+        folderPath: f.targetFolder !== null ? f.targetFolder : state.selectedFolder,
+      })),
+      createdFolders: [...state.pendingCreatedFolders],
+    };
+  } else {
+    state.uploadLedger = null;
+  }
+  state.pendingCreatedFolders = [];
+
   renderFileList();
   updateCounter();
 }
