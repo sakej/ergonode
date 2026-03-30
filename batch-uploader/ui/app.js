@@ -315,9 +315,15 @@ async function handleRevert() {
         for (const r of result.results) {
           if (r.success) {
             summary.filesOk++;
-            // Mark file as reverted in the file list
+            // Mark file as reverted in the file list (match by name + folder)
+            const deletedName = r.path.split("/").pop();
+            const deletedFolder = r.path.includes("/")
+              ? r.path.substring(0, r.path.lastIndexOf("/"))
+              : null;
             const match = state.files.find(f =>
-              f.status === "done" && f.name === r.path.split("/").pop()
+              f.status === "done" &&
+              f.name === deletedName &&
+              (f.targetFolder ?? state.selectedFolder ?? null) === deletedFolder
             );
             if (match) {
               match.status = "reverted";
@@ -399,7 +405,7 @@ async function handleRevert() {
 
   // Refresh folder tree if folders were deleted
   if (choice.deleteFolders) {
-    await loadFolders();
+    try { await loadFolders(); } catch (e) { console.warn("[revert] folder refresh failed:", e); }
   }
 }
 
@@ -763,6 +769,7 @@ function showInlineStatus(msg) {
   rateLimitMsg.textContent = msg;
   rateLimitMsg.className = "rate-limit-msg";
   rateLimitMsg.style.color = "";
+  rateLimitMsg.title = "";
   rateLimitMsg.classList.remove("hidden");
   console.log("[folder-drop]", msg);
 }
