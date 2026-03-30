@@ -24,6 +24,13 @@ pub struct DriveFileInfo {
     pub relative_dir: String,
 }
 
+/// Result from the picker flow — files + access token for subsequent downloads
+#[derive(Serialize)]
+pub struct PickerResult {
+    pub files: Vec<DriveFileInfo>,
+    pub access_token: String,
+}
+
 /// Check if the Google Drive feature is available (Client ID is embedded)
 pub fn is_available() -> bool {
     CLIENT_ID.map(|s| !s.is_empty()).unwrap_or(false)
@@ -57,7 +64,7 @@ fn is_google_native_format(mime_type: &str) -> bool {
 
 /// Run the full OAuth + file listing flow.
 /// Returns a list of files ready for download.
-pub async fn pick_and_list_files() -> Result<Vec<DriveFileInfo>, String> {
+pub async fn pick_and_list_files() -> Result<PickerResult, String> {
     let client_id = CLIENT_ID.ok_or("Google Drive is not configured")?;
     if client_id.is_empty() {
         return Err("Google Drive Client ID is empty".to_string());
@@ -110,6 +117,15 @@ pub async fn pick_and_list_files() -> Result<Vec<DriveFileInfo>, String> {
     .build(hub_connector);
 
     let hub = DriveHub::new(hub_client, auth);
+
+    // Get the access token for later downloads
+    let scopes = &["https://www.googleapis.com/auth/drive.file"];
+    let access_token = hub
+        .auth
+        .get_token(scopes)
+        .await
+        .map_err(|e| format!("Failed to get access token: {e}"))?
+        .ok_or_else(|| "No access token returned".to_string())?;
 
     // List all files the user granted access to (paginated)
     let mut all_files: Vec<DriveFileInfo> = Vec::new();
@@ -169,7 +185,7 @@ pub async fn pick_and_list_files() -> Result<Vec<DriveFileInfo>, String> {
         }
     }
 
-    Ok(all_files)
+    Ok(PickerResult { files: all_files, access_token })
 }
 
 /// Recursively list all files in a Drive folder, building relative_dir paths.
@@ -242,4 +258,49 @@ fn list_folder_recursive<'a>(
 
         Ok(results)
     })
+}
+
+/// Download a Drive file to OS temp directory.
+/// Returns the absolute path of the downloaded temp file.
+pub async fn download_file(
+    file_id: &str,
+    file_name: &str,
+    access_token: &str,
+) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let url = format!(
+        "https://www.googleapis.com/drive/v3/files/{}?alt=media",
+        file_id
+    );
+
+    let resp = client
+        .get(&url)
+        .bearer_auth(access_token)
+        .send()
+        .await
+        .map_err(|e| format!("Drive download error: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Drive download failed ({status}): {body}"));
+    }
+
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("Download read error: {e}"))?;
+
+    let safe_name = file_name.replace(['/', '\\', ':'], "_");
+    let temp_path = std::env::temp_dir().join(format!("ergonode_drive_{}_{}", file_id, safe_name));
+    tokio::fs::write(&temp_path, &bytes)
+        .await
+        .map_err(|e| format!("Cannot write temp file: {e}"))?;
+
+    Ok(temp_path.to_string_lossy().to_string())
+}
+
+/// Delete a temp file (silently ignore if not found).
+pub fn delete_temp_file(path: &str) {
+    let _ = std::fs::remove_file(path);
 }
