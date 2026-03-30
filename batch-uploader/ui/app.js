@@ -1022,6 +1022,7 @@ async function handleGoogleDrivePicker() {
   if (!driveFiles || driveFiles.length === 0) {
     scanSpinner.classList.add("hidden");
     dropZone.classList.remove("hidden");
+    showInlineStatus("No supported files found in Google Drive selection");
     return;
   }
 

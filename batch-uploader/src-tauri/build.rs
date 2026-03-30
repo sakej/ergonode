@@ -1,4 +1,7 @@
 fn main() {
+    // Only re-run when .env changes
+    println!("cargo:rerun-if-changed=../.env");
+
     // Read .env file if present (for local dev)
     if let Ok(contents) = std::fs::read_to_string("../.env") {
         for line in contents.lines() {
