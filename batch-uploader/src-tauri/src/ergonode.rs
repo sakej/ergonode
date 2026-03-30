@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 // ---------- Public types ----------
 
@@ -313,9 +314,17 @@ impl ErgonodeClient {
         paths: &[String],
         delete_type: &str,
     ) -> Result<BatchDeleteResult, String> {
+        if paths.is_empty() {
+            return Ok(BatchDeleteResult { results: vec![] });
+        }
+        if paths.len() > 50 {
+            return Err("batch_delete accepts at most 50 paths per call".to_string());
+        }
+
         let mutation_name = match delete_type {
+            "file" => "multimediaDelete",
             "folder" => "multimediaFolderDelete",
-            _ => "multimediaDelete",
+            other => return Err(format!("Unknown delete_type: {other}")),
         };
 
         // Build aliased mutations: d0: multimediaDelete(input:{path:"..."}) { __typename }
@@ -361,8 +370,7 @@ impl ErgonodeClient {
         let errors = body.get("errors").and_then(|e| e.as_array());
 
         // Build a set of aliases that had errors
-        let mut error_map: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
+        let mut error_map: HashMap<String, String> = HashMap::new();
         if let Some(errs) = errors {
             for err in errs {
                 // Errors may have a "path" field like ["d0"] indicating which alias failed
