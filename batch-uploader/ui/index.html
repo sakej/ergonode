@@ -14,7 +14,7 @@
       <h1>Ergonode Batch Uploader</h1>
     </header>
 
-    <!-- Settings Card -->
+    <!-- Settings Card — full form when disconnected -->
     <section class="card" id="settings-card">
       <h2>Connection Settings</h2>
       <div class="form-group">
@@ -22,7 +22,7 @@
         <input type="url" id="api-url" placeholder="https://your-instance.ergonode.com">
       </div>
       <div class="form-group">
-        <label for="api-key">API Key</label>
+        <label for="api-key">API Key <span class="label-hint">(must have "Allow to write" privilege)</span></label>
         <div class="input-with-toggle">
           <input type="password" id="api-key" placeholder="Enter your API key">
           <button type="button" class="btn-icon" id="toggle-key" title="Show/hide API key">
@@ -37,6 +37,15 @@
       <div id="connection-status" class="status-message hidden"></div>
     </section>
 
+    <!-- Connected bar — compact after successful connection -->
+    <div id="connected-bar" class="connected-bar hidden">
+      <div class="connected-info">
+        <span class="connected-dot"></span>
+        <span class="connected-label">Connected to <strong id="connected-url"></strong></span>
+      </div>
+      <button class="btn btn-small btn-ghost" id="btn-disconnect">Disconnect</button>
+    </div>
+
     <!-- Workspace (hidden until connected) -->
     <div id="workspace" class="hidden">
 
@@ -45,15 +54,15 @@
         <div class="card-header">
           <h2>Upload Destination</h2>
           <div class="button-row">
-            <button class="btn btn-small btn-secondary" id="btn-new-folder">New Folder</button>
-            <button class="btn btn-small btn-secondary" id="btn-refresh-folders">Refresh</button>
+            <button class="btn btn-small btn-ghost" id="btn-new-folder">+ New Folder</button>
+            <button class="btn btn-small btn-ghost" id="btn-refresh-folders">Refresh</button>
           </div>
         </div>
         <div id="new-folder-form" class="hidden">
           <div class="inline-form">
             <input type="text" id="new-folder-name" placeholder="Folder name">
             <button class="btn btn-small btn-primary" id="btn-create-folder">Create</button>
-            <button class="btn btn-small btn-secondary" id="btn-cancel-folder">Cancel</button>
+            <button class="btn btn-small btn-ghost" id="btn-cancel-folder">Cancel</button>
           </div>
           <div id="new-folder-status" class="status-message hidden"></div>
         </div>
@@ -70,8 +79,14 @@
         <h2>Files</h2>
         <div id="drop-zone" class="drop-zone">
           <div class="drop-zone-content">
-            <div class="drop-zone-icon">+</div>
-            <p>Drag &amp; drop files here or click to browse</p>
+            <div class="drop-zone-icon">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </div>
+            <p>Drag &amp; drop files here or <span class="link-text">browse</span></p>
           </div>
         </div>
 
@@ -83,7 +98,8 @@
             </div>
             <div class="button-row">
               <button class="btn btn-primary" id="btn-upload">Upload All</button>
-              <button class="btn btn-secondary" id="btn-clear-files">Clear All</button>
+              <button class="btn btn-stop hidden" id="btn-stop">Stop</button>
+              <button class="btn btn-ghost" id="btn-clear-files">Clear All</button>
             </div>
           </div>
           <div id="file-list" class="file-list"></div>

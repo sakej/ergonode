@@ -19,6 +19,7 @@ const state = {
 
   // Upload queue
   uploading: false,
+  stopping: false,
   maxConcurrency: 4,
   concurrency: 4,
   activeUploads: 0,
@@ -30,6 +31,64 @@ const state = {
 
 const MAX_FILE_SIZE = 104857600; // 100 MB
 
+// Ergonode GraphQL error codes → human-readable messages
+// https://docs.ergonode.com/graphql/overview/error-codes
+const ERGONODE_ERRORS = {
+  "d62579bf-6fde-4396-9f12-bc71d6394746": "File already exists in this folder",
+  "eabcf146-a4e7-425c-999f-9e04a6c8a988": "File not found at path",
+  "9670b62d-5db8-4de8-81bd-7d6119625df0": "File must be an image",
+  "df8637af-d466-48c6-a59d-e7126250a654": "File is too large",
+  "dd4722d6-9371-42a2-9c35-87b2a03009e7": "File extension not supported",
+  "9465e18e-be76-46e8-ab9f-1db22426ab06": "File corrupted or extension mismatch",
+  "ef0dd12b-f075-4bbb-8535-4f299452cf30": "Extension doesn't match file type",
+  "d64f83eb-32ae-48f6-a46d-ffa4fcba6ee3": "Destination folder not found",
+  "54c25a35-59da-4215-aa61-997bb80d303f": "Folder already exists",
+  "aa82dbed-9098-4d4b-af22-3a0dde5d47bb": "File type not accepted",
+  "c1051bb4-d103-4f74-8988-acbcafc7fdc3": "Value cannot be blank",
+  "d94b19cc-114f-4f44-9cc4-4138e80a87b9": "File name too long",
+};
+
+function parseUploadError(rawError) {
+  if (!rawError) return "Unknown error";
+
+  // Try to parse as JSON (raw GQL error object from Rust)
+  try {
+    const err = JSON.parse(rawError);
+    // Log full structure for debugging
+    console.log("GQL error:", JSON.stringify(err, null, 2));
+
+    // Check for Ergonode error codes anywhere in the structure
+    const jsonStr = JSON.stringify(err);
+    for (const [code, message] of Object.entries(ERGONODE_ERRORS)) {
+      if (jsonStr.includes(code)) return message;
+    }
+
+    // Use extensions.code if available
+    const code = err.extensions?.code;
+    const msg = err.message || "";
+    if (code && msg && msg !== "An unknown error occurred.") {
+      return code + ": " + msg;
+    }
+    if (code) return code;
+    if (msg) return msg;
+  } catch (_) {
+    // Not JSON — treat as plain string
+  }
+
+  // Check for known Ergonode error code UUIDs in plain text
+  for (const [code, message] of Object.entries(ERGONODE_ERRORS)) {
+    if (rawError.includes(code)) return message;
+  }
+  // Clean up common HTTP patterns
+  if (rawError.includes("429")) return "Rate limited (429)";
+  if (rawError.includes("413")) return "File too large (413)";
+  if (rawError.includes("401") || rawError.includes("403")) return "Auth failed";
+  if (rawError.includes("500")) return "Server error (500)";
+  if (rawError.includes("timeout") || rawError.includes("Timeout")) return "Upload timed out";
+  // Return as-is but truncated
+  return rawError.length > 80 ? rawError.substring(0, 77) + "..." : rawError;
+}
+
 // ---------- DOM refs ----------
 
 const $ = (sel) => document.querySelector(sel);
@@ -40,6 +99,10 @@ const eyeIcon         = $("#eye-icon");
 const btnConnect      = $("#btn-connect");
 const btnClear        = $("#btn-clear");
 const connStatus      = $("#connection-status");
+const settingsCard    = $("#settings-card");
+const connectedBar    = $("#connected-bar");
+const connectedUrl    = $("#connected-url");
+const btnDisconnect   = $("#btn-disconnect");
 const workspace       = $("#workspace");
 const folderTree      = $("#folder-tree");
 const selectedDisplay = $("#selected-folder-path");
@@ -56,6 +119,7 @@ const fileListEl      = $("#file-list");
 const uploadCounter   = $("#upload-counter");
 const rateLimitMsg    = $("#rate-limit-msg");
 const btnUpload       = $("#btn-upload");
+const btnStop         = $("#btn-stop");
 const btnClearFiles   = $("#btn-clear-files");
 
 // ---------- Init ----------
@@ -85,6 +149,7 @@ function bindEvents() {
 
   btnConnect.addEventListener("click", handleConnect);
   btnClear.addEventListener("click", handleClearSettings);
+  btnDisconnect.addEventListener("click", handleDisconnect);
 
   // Folder controls
   btnNewFolder.addEventListener("click", () => {
@@ -107,6 +172,7 @@ function bindEvents() {
 
   // Upload controls
   btnUpload.addEventListener("click", startUploadQueue);
+  btnStop.addEventListener("click", stopUploadQueue);
   btnClearFiles.addEventListener("click", clearFiles);
 }
 
@@ -169,6 +235,11 @@ async function handleConnect() {
     await invoke("save_settings", { apiUrl, apiKey, folderPath: state.selectedFolder });
 
     showStatus(connStatus, "Connected successfully!", "success");
+
+    // Switch to compact connected bar
+    settingsCard.classList.add("hidden");
+    connectedUrl.textContent = apiUrl.replace(/^https?:\/\//, "");
+    connectedBar.classList.remove("hidden");
     workspace.classList.remove("hidden");
 
     await loadFolders();
@@ -184,12 +255,22 @@ async function handleClearSettings() {
   try {
     await invoke("clear_settings");
   } catch (_) {}
+  resetToDisconnected();
   apiUrlInput.value = "";
   apiKeyInput.value = "";
+}
+
+function handleDisconnect() {
+  resetToDisconnected();
+}
+
+function resetToDisconnected() {
   state.apiUrl = "";
   state.apiKey = "";
   state.connected = false;
   state.selectedFolder = null;
+  settingsCard.classList.remove("hidden");
+  connectedBar.classList.add("hidden");
   workspace.classList.add("hidden");
   hideStatus(connStatus);
 }
@@ -422,6 +503,7 @@ async function addFilesByPath(paths) {
 
   renderFileList();
   uploadControls.classList.remove("hidden");
+  dropZone.classList.add("hidden");
 }
 
 // ---------- File List Rendering ----------
@@ -429,7 +511,12 @@ async function addFilesByPath(paths) {
 function renderFileList() {
   fileListEl.innerHTML = "";
 
-  for (const file of state.files) {
+  // During upload: only show uploading, failed, skipped (hide queued and done)
+  const visibleFiles = state.uploading
+    ? state.files.filter((f) => f.status === "uploading" || f.status === "failed" || f.status === "skipped")
+    : state.files;
+
+  for (const file of visibleFiles) {
     const row = document.createElement("div");
     row.className = "file-item";
     row.id = "file-" + file.id;
@@ -508,8 +595,8 @@ function statusLabel(file) {
     case "queued":     return "Queued";
     case "uploading":  return "Uploading...";
     case "done":       return "Done";
-    case "failed":     return "Failed";
-    case "skipped":    return "Skipped";
+    case "failed":     return file.error || "Failed";
+    case "skipped":    return file.error || "Skipped";
     default:           return file.status;
   }
 }
@@ -544,6 +631,7 @@ function clearFiles() {
   state.files = [];
   fileListEl.innerHTML = "";
   uploadControls.classList.add("hidden");
+  dropZone.classList.remove("hidden");
   updateCounter();
 }
 
@@ -556,17 +644,29 @@ function startUploadQueue() {
   if (uploadable.length === 0) return;
 
   state.uploading = true;
+  state.stopping = false;
   state.paused = false;
   state.activeUploads = 0;
-  btnUpload.disabled = true;
-  btnClearFiles.disabled = true;
+  btnUpload.classList.add("hidden");
+  btnClearFiles.classList.add("hidden");
+  btnStop.classList.remove("hidden");
   rateLimitMsg.classList.add("hidden");
 
   pumpQueue();
 }
 
+function stopUploadQueue() {
+  state.stopping = true;
+  btnStop.disabled = true;
+  btnStop.textContent = "Stopping...";
+}
+
 function pumpQueue() {
   if (state.paused) return;
+  if (state.stopping) {
+    if (state.activeUploads === 0) finishQueue();
+    return;
+  }
 
   while (state.activeUploads < state.concurrency) {
     const next = state.files.find((f) => f.status === "queued");
@@ -619,13 +719,13 @@ async function uploadSingleFile(file) {
       }
     } else {
       file.status = "failed";
-      file.error = result.error || "Unknown error";
+      file.error = parseUploadError(result.error);
       state.consecutiveSuccess = 0;
       updateFileRow(file);
     }
   } catch (err) {
     file.status = "failed";
-    file.error = String(err);
+    file.error = parseUploadError(String(err));
     state.consecutiveSuccess = 0;
     updateFileRow(file);
   }
@@ -673,12 +773,18 @@ function handleRateLimit() {
 
 function finishQueue() {
   state.uploading = false;
+  state.stopping = false;
   state.paused = false;
   state.backoff = 5000;
   state.consecutiveSuccess = 0;
   state.concurrency = state.maxConcurrency;
+  btnUpload.classList.remove("hidden");
   btnUpload.disabled = false;
+  btnClearFiles.classList.remove("hidden");
   btnClearFiles.disabled = false;
+  btnStop.classList.add("hidden");
+  btnStop.disabled = false;
+  btnStop.textContent = "Stop";
   rateLimitMsg.classList.add("hidden");
   renderFileList();
   updateCounter();

@@ -27,6 +27,27 @@ struct GqlResponse<T> {
 #[derive(Deserialize)]
 struct GqlError {
     message: String,
+    extensions: Option<GqlErrorExtensions>,
+}
+
+#[derive(Deserialize)]
+struct GqlErrorExtensions {
+    code: Option<String>,
+    #[serde(rename = "errorCode")]
+    error_code: Option<String>,
+}
+
+/// Extract the most useful error string from a GraphQL error.
+/// Tries extensions.code / extensions.errorCode first, falls back to message.
+fn extract_gql_error(error: &GqlError) -> String {
+    if let Some(ext) = &error.extensions {
+        if let Some(code) = ext.code.as_deref().or(ext.error_code.as_deref()) {
+            if !code.is_empty() {
+                return format!("{}: {}", code, error.message);
+            }
+        }
+    }
+    error.message.clone()
 }
 
 #[derive(Deserialize)]
@@ -322,17 +343,14 @@ impl ErgonodeClient {
         let body: serde_json::Value =
             resp.json().await.map_err(|e| format!("Bad response: {e}"))?;
 
-        if let Some(errors) = body.get("errors") {
-            if let Some(arr) = errors.as_array() {
+        // Pass the full raw error JSON so the frontend can parse it
+        if let Some(errors_val) = body.get("errors") {
+            if let Some(arr) = errors_val.as_array() {
                 if !arr.is_empty() {
-                    let msg = arr[0]
-                        .get("message")
-                        .and_then(|m| m.as_str())
-                        .unwrap_or("Unknown error");
                     return Ok(UploadResult {
                         file_name: file_name.to_string(),
                         success: false,
-                        error: Some(msg.to_string()),
+                        error: Some(arr[0].to_string()),
                         rate_limited: false,
                     });
                 }
