@@ -61,11 +61,14 @@ jobs:
             echo "Fixing $DMG"
             TEMP="${DMG}.rw.dmg"
             hdiutil convert "$DMG" -format UDRW -o "$TEMP"
-            MOUNT=$(hdiutil attach "$TEMP" -readwrite -noverify | grep "/Volumes/" | sed 's/.*\/Volumes/\/Volumes/')
+            MOUNT=$(hdiutil attach "$TEMP" -readwrite -noverify -nobrowse | grep "/Volumes/" | sed 's/.*\/Volumes/\/Volumes/')
+            echo "Mounted at: $MOUNT"
             rm -f "$MOUNT/.VolumeIcon.icns"
             SetFile -a c "$MOUNT" 2>/dev/null || true
+            sleep 2
             rm -rf "$MOUNT/.fseventsd" "$MOUNT/.DS_Store" "$MOUNT/.Trashes" "$MOUNT/.Spotlight-V100" 2>/dev/null || true
-            hdiutil detach "$MOUNT"
+            sync
+            hdiutil detach "$MOUNT" -force
             rm "$DMG"
             hdiutil convert "$TEMP" -format UDZO -o "$DMG"
             rm "$TEMP"
