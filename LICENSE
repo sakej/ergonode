@@ -1,0 +1,33 @@
+Ergonode Community Tools License
+
+Copyright (c) 2026 Marcin Krasicki
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to use,
+copy, and modify the Software for personal, internal, or non-commercial
+purposes, subject to the following conditions:
+
+1. FREE USE. You may freely use, copy, and modify the Software for any
+   purpose that does not generate revenue, including personal projects,
+   internal company use, education, and evaluation.
+
+2. COMMERCIAL USE REQUIRES A LICENSE. A separate commercial license is
+   required if you:
+   (a) Include the Software, in whole or in part, in a product or service
+       that is sold, licensed, or otherwise distributed for a fee;
+   (b) Use the Software as part of a paid service or offering;
+   (c) Distribute the Software as part of a commercial product.
+
+   To obtain a commercial license, contact: marcin@krasicki.dev
+
+3. ATTRIBUTION. Redistributions of the Software, whether modified or
+   unmodified, must retain this license notice and the above copyright
+   notice.
+
+4. NO WARRANTY. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+   KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+   IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+   FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+   DEALINGS IN THE SOFTWARE.
