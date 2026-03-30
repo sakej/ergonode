@@ -142,6 +142,14 @@ jobs:
             | macOS | `.dmg` | x64 (Intel) |
             | Linux | `.AppImage` or `.deb` | x64 |
 
+            ### Windows: SmartScreen warning
+
+            This build is not code-signed. Windows SmartScreen may show a warning. To run the installer:
+
+            Click **More info** → **Run anyway**
+
+            Or: right-click the `.msi`/`.exe` → Properties → check **Unblock** → Apply
+
             ### macOS: "damaged and can't be opened"
 
             This build is not signed with an Apple Developer certificate. macOS Gatekeeper will block it by default. To open the app:
