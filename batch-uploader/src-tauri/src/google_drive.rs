@@ -330,6 +330,18 @@ pub async fn download_file(
 }
 
 /// Delete a temp file (silently ignore if not found).
+/// Only deletes files within the OS temp directory that were created by this app.
 pub fn delete_temp_file(path: &str) {
-    let _ = std::fs::remove_file(path);
+    let path = std::path::Path::new(path);
+    if let Ok(canonical) = path.canonicalize() {
+        if canonical.starts_with(std::env::temp_dir())
+            && canonical
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.starts_with("ergonode_drive_"))
+                .unwrap_or(false)
+        {
+            let _ = std::fs::remove_file(canonical);
+        }
+    }
 }

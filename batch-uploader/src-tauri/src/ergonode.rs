@@ -1,6 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Escape a string for embedding inside a GraphQL string literal.
+/// Handles both backslashes and double quotes.
+fn escape_gql(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 // ---------- Public types ----------
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -218,28 +224,28 @@ impl ErgonodeClient {
 
     /// Create a folder via the multimediaFolderCreate mutation.
     pub async fn create_folder(&self, name: &str, parent_path: Option<&str>) -> Result<(), String> {
-        let escaped_name = name.replace('"', r#"\""#);
+        let escaped_name = escape_gql(name);
 
-        let input = match parent_path {
+        let query = match parent_path {
             Some(p) if !p.is_empty() => {
-                let escaped_path = p.replace('"', r#"\""#);
+                let escaped_path = escape_gql(p);
                 format!(
-                    r#"name:\"{escaped_name}\",folderPath:\"{escaped_path}\",createFolderPath:true"#
+                    r#"mutation {{ multimediaFolderCreate(input: {{ name:"{escaped_name}",folderPath:"{escaped_path}",createFolderPath:true }}) {{ __typename }} }}"#
                 )
             }
-            _ => format!(r#"name:\"{escaped_name}\",createFolderPath:true"#),
+            _ => format!(
+                r#"mutation {{ multimediaFolderCreate(input: {{ name:"{escaped_name}",createFolderPath:true }}) {{ __typename }} }}"#
+            ),
         };
 
-        let query = format!(
-            r#"{{"query":"mutation {{ multimediaFolderCreate(input: {{ {input} }}) {{ __typename }} }}"}}"#
-        );
+        let body = serde_json::json!({ "query": query });
 
         let resp = self
             .client
             .post(self.endpoint())
             .header("X-API-KEY", &self.api_key)
             .header("Content-Type", "application/json")
-            .body(query)
+            .body(body.to_string())
             .send()
             .await
             .map_err(|e| format!("Network error: {e}"))?;
@@ -332,22 +338,20 @@ impl ErgonodeClient {
             .iter()
             .enumerate()
             .map(|(i, path)| {
-                let escaped = path.replace('"', r#"\""#);
-                format!(r#"d{i}:{mutation_name}(input:{{path:\"{escaped}\"}}){{__typename}}"#)
+                let escaped = escape_gql(path);
+                format!(r#"d{i}:{mutation_name}(input:{{path:"{escaped}"}}){{__typename}}"#)
             })
             .collect();
 
-        let query = format!(
-            r#"{{"query":"mutation{{{}}}" }}"#,
-            mutations.join(" ")
-        );
+        let query_str = format!("mutation{{{}}}", mutations.join(" "));
+        let body = serde_json::json!({ "query": query_str });
 
         let resp = self
             .client
             .post(self.endpoint())
             .header("X-API-KEY", &self.api_key)
             .header("Content-Type", "application/json")
-            .body(query)
+            .body(body.to_string())
             .send()
             .await
             .map_err(|e| format!("Network error: {e}"))?;
@@ -449,11 +453,11 @@ impl ErgonodeClient {
             .await
             .map_err(|e| format!("Failed to read file: {e}"))?;
 
-        let escaped_name = file_name.replace('"', r#"\""#);
+        let escaped_name = escape_gql(file_name);
 
         let mutation = match folder_path {
             Some(p) if !p.is_empty() => {
-                let escaped_path = p.replace('"', r#"\""#);
+                let escaped_path = escape_gql(p);
                 format!(
                     r#"mutation{{multimediaCreate(input:{{name:"{escaped_name}",folderPath:"{escaped_path}"}}){{__typename}}}}"#
                 )

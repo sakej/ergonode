@@ -8,6 +8,9 @@
   },
   "app": {
     "withGlobalTauri": true,
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+    },
     "windows": [
       {
         "title": "Ergonode Batch Uploader",
