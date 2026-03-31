@@ -1,4 +1,5 @@
 mod config;
+mod credential_store;
 mod ergonode;
 mod fs_utils;
 mod google_drive;
