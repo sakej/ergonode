@@ -12,22 +12,6 @@ Every Ergonode API command (`test_connection`, `fetch_folders`, `upload_file`, e
 
 **Scope:** Modify `ergonode.rs` to accept a shared client, or store one in Tauri state alongside `CredentialStore`.
 
-### Remove dead `set_ergonode_credentials` method
-
-**Status:** Planned
-
-`CredentialStore::set_ergonode_credentials()` in `credential_store.rs:133` has no callers — all credential setting goes through `set_all()`. Should be removed to eliminate the compiler warning.
-
-## UX
-
-### "Clear Settings" should offer to clear keychain
-
-**Status:** Planned
-
-Currently "Clear Settings" only clears config.json (folder_path) and form fields. The keychain entry persists, so "Load from Keychain" still works on next launch. Users who expect "clear" to mean "clear everything" may be confused.
-
-**Fix:** Either add a separate "Delete saved credentials" button, or show a confirmation dialog asking whether to also clear the keychain entry.
-
 ### Refactor app.js into smaller modules
 
 **Status:** Planned
@@ -58,6 +42,9 @@ The `ExitRequested` shutdown hook calls `save_to_keychain_sync()` which uses `to
 - **"Open manually" auth link fixed** — uses `open_url` command in Tauri webview
 - **File picker guard** — clicking Drive setup inputs no longer opens file picker
 - **No keychain access on startup** — removed probe; "Load from Keychain" always visible, keychain accessed only on explicit click
+- **Clear Settings offers keychain clear** — modal asks whether to also delete saved credentials
+- **Removed dead `set_ergonode_credentials`** — eliminated compiler warning
+- **Cleaned up debug logging** — removed troubleshooting noise, kept operational diagnostics
 
 ### v1.4.0
 

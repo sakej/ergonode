@@ -424,6 +424,30 @@ function showKeychainConsentModal(action) {
   });
 }
 
+function showKeychainClearModal() {
+  return new Promise((resolve) => {
+    keychainModalTitle.textContent = `Delete from ${state.platformLabel}?`;
+    keychainModalBody.textContent = `Also remove saved credentials from the OS ${state.platformLabel}?`;
+    keychainModalSave.textContent = "Delete";
+    keychainModalSkip.textContent = "Keep";
+    keychainModal.classList.remove("hidden");
+
+    const cleanup = () => {
+      keychainModal.classList.add("hidden");
+      keychainModalSave.textContent = "Save";
+      keychainModalSkip.textContent = "Not now";
+      keychainModalSave.removeEventListener("click", onDelete);
+      keychainModalSkip.removeEventListener("click", onKeep);
+    };
+
+    const onDelete = () => { cleanup(); resolve(true); };
+    const onKeep = () => { cleanup(); resolve(false); };
+
+    keychainModalSave.addEventListener("click", onDelete, { once: true });
+    keychainModalSkip.addEventListener("click", onKeep, { once: true });
+  });
+}
+
 // ---------- Folder Modal ----------
 
 // Returns a Promise<boolean> — true if user clicked Continue, false if Cancel
@@ -764,6 +788,19 @@ async function handleClearSettings() {
   googleClientIdInput.value = "";
   googleClientSecretInput.value = "";
   state.loadedFromKeychain = false;
+
+  // Offer to also clear saved credentials from keychain (delete is idempotent)
+  const shouldDelete = await showKeychainClearModal();
+  if (shouldDelete) {
+    try {
+      await invoke("delete_keychain_entry");
+      showStatus(connStatus, `Settings and ${state.platformLabel} cleared.`, "success");
+    } catch (err) {
+      showStatus(connStatus, `Settings cleared, but ${state.platformLabel} deletion failed: ${err}`, "error");
+    }
+  } else {
+    showStatus(connStatus, "Settings cleared.", "success");
+  }
 }
 
 function handleDisconnect() {

@@ -129,14 +129,6 @@ impl CredentialStore {
         }
     }
 
-    /// Update Ergonode credentials in memory.
-    pub async fn set_ergonode_credentials(&self, api_url: String, api_key: String) {
-        let mut blob = self.blob.write().await;
-        blob.api_url = Some(api_url);
-        blob.api_key = Some(api_key);
-        self.dirty.store(true, Ordering::Release);
-    }
-
     /// Get Ergonode credentials from memory.
     pub async fn get_ergonode_credentials(&self) -> (String, String) {
         let blob = self.blob.read().await;
@@ -280,19 +272,16 @@ impl CredentialStore {
 
     fn read_blob() -> Result<CredentialBlob, String> {
         // Try keychain first — exactly one get_password() call
-        eprintln!("[credentials] read_blob: about to call get_password — EXPECT 1 PROMPT");
         if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, KEYRING_KEY) {
             match entry.get_password() {
                 Ok(json) => {
-                    eprintln!("[credentials] read_blob: get_password returned OK");
                     if let Ok(blob) = serde_json::from_str::<CredentialBlob>(&json) {
                         eprintln!("[credentials] Loaded from OS keychain");
                         return Ok(blob);
                     }
-                    eprintln!("[credentials] read_blob: JSON parse failed");
                 }
                 Err(e) => {
-                    eprintln!("[credentials] read_blob: get_password failed: {e}");
+                    eprintln!("[credentials] Keychain read failed: {e}");
                 }
             }
         }
