@@ -11,7 +11,7 @@ Built with [Tauri](https://tauri.app/) (Rust backend + vanilla HTML/CSS/JS front
 - **Folder structure recreation** — drop a folder and recreate its tree in Ergonode automatically
 - **Upload options** — flat upload (no subfolders) and include root folder toggles
 - **Revert upload** — undo the last upload batch (delete files and/or folders) with batched GraphQL mutations
-- **55+ supported file types** — images, videos, documents, 3D models, CAD, Adobe files, and more
+- **53 supported file types** — images, videos, documents, 3D models, CAD, Adobe files, and more
 - **Folder tree** browser — pick or create destination folders directly from your Ergonode instance
 - **Rate limit handling** — respects Ergonode's 250 req/min media limit with automatic exponential backoff on 429 responses
 - **Concurrent uploads** — up to 4 parallel uploads with dynamic concurrency adjustment; **single connection** toggle to limit to 1 at a time
