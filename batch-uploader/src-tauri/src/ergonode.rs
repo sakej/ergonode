@@ -46,27 +46,6 @@ struct GqlResponse<T> {
 #[derive(Deserialize)]
 struct GqlError {
     message: String,
-    extensions: Option<GqlErrorExtensions>,
-}
-
-#[derive(Deserialize)]
-struct GqlErrorExtensions {
-    code: Option<String>,
-    #[serde(rename = "errorCode")]
-    error_code: Option<String>,
-}
-
-/// Extract the most useful error string from a GraphQL error.
-/// Tries extensions.code / extensions.errorCode first, falls back to message.
-fn extract_gql_error(error: &GqlError) -> String {
-    if let Some(ext) = &error.extensions {
-        if let Some(code) = ext.code.as_deref().or(ext.error_code.as_deref()) {
-            if !code.is_empty() {
-                return format!("{}: {}", code, error.message);
-            }
-        }
-    }
-    error.message.clone()
 }
 
 #[derive(Deserialize)]

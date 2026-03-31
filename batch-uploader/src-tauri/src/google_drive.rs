@@ -331,13 +331,6 @@ pub struct AuthResult {
     pub access_token: String,
 }
 
-/// Import result — files ready for download + upload
-#[derive(Serialize)]
-pub struct ImportResult {
-    pub files: Vec<DriveFileInfo>,
-    pub access_token: String,
-}
-
 // ---------- Download ----------
 
 /// Download a Drive file to OS temp directory.
