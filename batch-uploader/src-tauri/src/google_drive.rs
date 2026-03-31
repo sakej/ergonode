@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::oneshot;
 
+use crate::token_storage::KeychainTokenStorage;
+
 /// Custom delegate that opens the browser for OAuth and emits the URL to the frontend.
 struct BrowserDelegate {
     app: AppHandle,
@@ -83,7 +85,7 @@ fn is_google_native_format(mime_type: &str) -> bool {
 
 // ---------- OAuth ----------
 
-/// Run OAuth flow — opens browser, user authorizes, returns access token.
+/// Run OAuth flow — uses cached token if available, otherwise opens browser.
 /// Supports cancellation via the provided oneshot receiver.
 pub async fn authenticate(app: AppHandle, cancel_rx: oneshot::Receiver<()>) -> Result<String, String> {
     let client_id = CLIENT_ID.ok_or("Google Drive is not configured")?;
@@ -91,6 +93,57 @@ pub async fn authenticate(app: AppHandle, cancel_rx: oneshot::Receiver<()>) -> R
         return Err("Google Drive Client ID is empty".to_string());
     }
 
+    // Build first authenticator with persistent storage
+    let auth = build_auth(client_id, app.clone()).await?;
+
+    // Race: auth token vs cancel signal.
+    // Dropping auth.token() on cancel is safe — yup_oauth2's internal HTTP
+    // server runs in a spawned task that shuts itself down when its channels close.
+    let token_result = tokio::select! {
+        result = auth.token(&[DRIVE_SCOPE]) => result,
+        _ = cancel_rx => {
+            return Err("Auth cancelled".to_string());
+        }
+    };
+
+    // If failed with a cached token, clear and retry once (stale refresh token)
+    let token = match token_result {
+        Ok(t) => t,
+        Err(e) => {
+            let checker = KeychainTokenStorage::new();
+            if checker.has_token(&[DRIVE_SCOPE]) {
+                eprintln!("[google-drive] Token refresh failed ({e}), clearing cache and retrying");
+                checker.delete_token(&[DRIVE_SCOPE]);
+                let auth2 = build_auth(client_id, app.clone()).await?;
+                auth2.token(&[DRIVE_SCOPE]).await
+                    .map_err(|e| format!("OAuth failed: {e}"))?
+            } else {
+                return Err(format!("OAuth failed: {e}"));
+            }
+        }
+    };
+
+    let access_token = token
+        .token()
+        .ok_or("No access token returned")?
+        .to_string();
+
+    // Bring the app to the foreground
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_focus();
+    }
+
+    eprintln!("[google-drive] Auth complete, got access token");
+    Ok(access_token)
+}
+
+/// Build a fresh yup_oauth2 authenticator with keychain-backed storage.
+async fn build_auth(client_id: &str, app: AppHandle) -> Result<
+    yup_oauth2::authenticator::Authenticator<
+        hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
+    >,
+    String,
+> {
     let secret = yup_oauth2::ApplicationSecret {
         client_id: client_id.to_string(),
         client_secret: CLIENT_SECRET.unwrap_or("").to_string(),
@@ -114,40 +167,16 @@ pub async fn authenticate(app: AppHandle, cancel_rx: oneshot::Receiver<()>) -> R
     )
     .build(connector);
 
-    let auth = yup_oauth2::InstalledFlowAuthenticator::with_client(
+    yup_oauth2::InstalledFlowAuthenticator::with_client(
         secret,
         yup_oauth2::InstalledFlowReturnMethod::HTTPRedirect,
         yup_oauth2::client::CustomHyperClientBuilder::from(client),
     )
-    .flow_delegate(Box::new(BrowserDelegate { app: app.clone() }))
+    .with_storage(Box::new(KeychainTokenStorage::new()))
+    .flow_delegate(Box::new(BrowserDelegate { app }))
     .build()
     .await
-    .map_err(|e| format!("OAuth setup failed: {e}"))?;
-
-    // Race: auth token vs cancel signal.
-    // Dropping auth.token() on cancel is safe — yup_oauth2's internal HTTP
-    // server runs in a spawned task that shuts itself down when its channels close.
-    let token = tokio::select! {
-        result = auth.token(&[DRIVE_SCOPE]) => {
-            result.map_err(|e| format!("OAuth failed: {e}"))?
-        }
-        _ = cancel_rx => {
-            return Err("Auth cancelled".to_string());
-        }
-    };
-
-    let access_token = token
-        .token()
-        .ok_or("No access token returned")?
-        .to_string();
-
-    // Bring the app to the foreground
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.set_focus();
-    }
-
-    eprintln!("[google-drive] Auth complete, got access token");
-    Ok(access_token)
+    .map_err(|e| format!("OAuth setup failed: {e}"))
 }
 
 // ---------- Drive API via reqwest ----------
@@ -348,6 +377,39 @@ pub async fn download_file(
         .map_err(|e| format!("Cannot write temp file: {e}"))?;
 
     Ok(temp_path.to_string_lossy().to_string())
+}
+
+// ---------- Sign out ----------
+
+/// Check if a Google OAuth token exists in storage.
+pub fn is_signed_in() -> bool {
+    let storage = KeychainTokenStorage::new();
+    storage.has_token(&[DRIVE_SCOPE])
+}
+
+/// Sign out of Google Drive — delete cached token and revoke it.
+pub async fn sign_out() -> Result<(), String> {
+    let storage = KeychainTokenStorage::new();
+    let token_info = storage.delete_token(&[DRIVE_SCOPE]);
+
+    // Best-effort revoke — try access token, fall back to refresh token
+    if let Some(info) = token_info {
+        let revoke_token = info.access_token.as_deref()
+            .or(info.refresh_token.as_deref());
+
+        if let Some(token) = revoke_token {
+            let client = reqwest::Client::new();
+            let _ = client
+                .post("https://oauth2.googleapis.com/revoke")
+                .form(&[("token", token)])
+                .send()
+                .await;
+            eprintln!("[google-drive] Token revoked");
+        }
+    }
+
+    eprintln!("[google-drive] Signed out");
+    Ok(())
 }
 
 /// Delete a temp file (silently ignore if not found).

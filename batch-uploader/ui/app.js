@@ -158,6 +158,7 @@ const driveModalClose    = $("#drive-modal-close");
 const authOverlay       = $("#auth-overlay");
 const authOverlayLink   = $("#auth-overlay-link");
 const authOverlayCancel = $("#auth-overlay-cancel");
+const btnGoogleSignOut  = $("#btn-google-sign-out");
 
 // ---------- Init ----------
 
@@ -220,6 +221,16 @@ function bindEvents() {
   driveLink.addEventListener("click", (e) => {
     e.stopPropagation(); // Don't trigger dropZone click
     handleGoogleDrivePicker();
+  });
+
+  // Google sign-out
+  btnGoogleSignOut.addEventListener("click", async () => {
+    try {
+      await invoke("google_drive_sign_out");
+      btnGoogleSignOut.classList.add("hidden");
+    } catch (err) {
+      console.warn("[google-sign-out]", err);
+    }
   });
 
   // Upload controls
@@ -537,6 +548,16 @@ async function handleConnect() {
     workspace.classList.remove("hidden");
 
     await loadFolders();
+
+    // Check if user is signed in to Google Drive
+    try {
+      const signedIn = await invoke("google_drive_is_signed_in");
+      if (signedIn) {
+        btnGoogleSignOut.classList.remove("hidden");
+      } else {
+        btnGoogleSignOut.classList.add("hidden");
+      }
+    } catch (_) {}
   } catch (err) {
     showStatus(connStatus, "Connection failed: " + err, "error");
     state.connected = false;
@@ -568,6 +589,7 @@ function resetToDisconnected() {
   settingsCard.classList.remove("hidden");
   connectedBar.classList.add("hidden");
   workspace.classList.add("hidden");
+  btnGoogleSignOut.classList.add("hidden");
   hideStatus(connStatus);
 }
 
@@ -1028,6 +1050,23 @@ const driveState = {
 };
 
 async function handleGoogleDrivePicker() {
+  // Try silent auth if already signed in (cached token — no overlay needed)
+  try {
+    const signedIn = await invoke("google_drive_is_signed_in");
+    if (signedIn) {
+      const result = await invoke("google_drive_auth");
+      driveState.accessToken = result.access_token;
+      btnGoogleSignOut.classList.remove("hidden");
+      driveState.path = [{ id: "root", name: "My Drive" }];
+      driveState.selected = new Set();
+      driveModal.classList.remove("hidden");
+      await driveLoadFolder("root");
+      return;
+    }
+  } catch (_) {
+    // Silent auth failed (token revoked, etc.) — fall through to full auth flow
+  }
+
   // Show auth overlay
   authOverlayLink.href = "#";
   authOverlayLink.classList.add("hidden");
@@ -1053,6 +1092,7 @@ async function handleGoogleDrivePicker() {
     const result = await invoke("google_drive_auth");
     if (cancelled) return;
     driveState.accessToken = result.access_token;
+    btnGoogleSignOut.classList.remove("hidden");
   } catch (err) {
     authOverlay.classList.add("hidden");
     unlisten();
