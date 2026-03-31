@@ -158,6 +158,8 @@ const driveSetupForm     = $("#drive-setup-form");
 const driveSetupClientId = $("#drive-setup-client-id");
 const driveSetupClientSecret = $("#drive-setup-client-secret");
 const btnDriveSetupSave  = $("#btn-drive-setup-save");
+const googleCredsHelpLink = $("#google-creds-help-link");
+const driveSetupHelpLink  = $("#drive-setup-help-link");
 const driveModal         = $("#drive-modal");
 const driveList          = $("#drive-list");
 const driveBreadcrumb    = $("#drive-breadcrumb");
@@ -235,6 +237,16 @@ function bindEvents() {
   btnClear.addEventListener("click", handleClearSettings);
   btnLoadKeychain.addEventListener("click", handleLoadKeychain);
   btnDisconnect.addEventListener("click", handleDisconnect);
+
+  // External links — Tauri webview doesn't follow <a target="_blank">
+  const GOOGLE_CREDS_URL = "https://github.com/sakej/ergonode/tree/main/batch-uploader#creating-your-own-client-id";
+  googleCredsHelpLink.addEventListener("click", () => {
+    invoke("open_url", { url: GOOGLE_CREDS_URL });
+  });
+  driveSetupHelpLink.addEventListener("click", (e) => {
+    e.stopPropagation();
+    invoke("open_url", { url: GOOGLE_CREDS_URL });
+  });
 
   // Folder controls
   btnNewFolder.addEventListener("click", () => {
@@ -376,6 +388,7 @@ function showKeychainConsentModal(action) {
       cleanup();
       try {
         await invoke("save_to_keychain");
+        state.loadedFromKeychain = true; // don't ask again on reconnect
       } catch (err) {
         console.warn("[keychain] Save failed:", err);
       }
@@ -736,6 +749,11 @@ async function handleClearSettings() {
 
 function handleDisconnect() {
   resetToDisconnected();
+  // Clear form fields — user must re-enter or load from keychain
+  apiUrlInput.value = "";
+  apiKeyInput.value = "";
+  googleClientIdInput.value = "";
+  googleClientSecretInput.value = "";
 }
 
 function resetToDisconnected() {

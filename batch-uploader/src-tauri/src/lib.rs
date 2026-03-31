@@ -93,6 +93,12 @@ fn get_platform_label() -> &'static str {
 
 // ---------- Legacy migration ----------
 
+/// Open a URL in the user's default browser.
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    open::that(&url).map_err(|e| format!("Failed to open URL: {e}"))
+}
+
 /// Migrate credentials from legacy config.json (file read only — no keychain access).
 /// Returns true if legacy credentials were found and loaded into memory.
 #[tauri::command]
@@ -293,6 +299,12 @@ async fn google_drive_sign_out(
 // ---------- App entry point ----------
 
 pub fn run() {
+    let session_id: u32 = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| (d.as_millis() % 100000) as u32)
+        .unwrap_or(0);
+    eprintln!("[app] Session {session_id} starting");
+
     let cred_store = Arc::new(CredentialStore::new());
 
     let app = tauri::Builder::default()
@@ -305,8 +317,8 @@ pub fn run() {
             // Credentials
             load_from_keychain, save_to_keychain,
             delete_keychain_entry, set_credentials, set_google_client, get_credentials, get_platform_label,
-            // Migration
-            run_migration,
+            // Util
+            open_url, run_migration,
             // Ergonode API
             test_connection, fetch_folders, create_folder, upload_file, get_file_size,
             scan_directory, is_directory, create_folders_batch, batch_delete,

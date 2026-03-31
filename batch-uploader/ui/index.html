@@ -19,22 +19,22 @@
       <h2>Connection Settings</h2>
       <div class="form-group">
         <label for="api-url">API URL</label>
-        <input type="url" id="api-url" placeholder="https://your-instance.ergonode.cloud">
+        <input type="url" id="api-url" placeholder="https://your-instance.ergonode.cloud" autocomplete="off" data-1p-ignore data-bwignore>
       </div>
       <div class="form-group">
         <label for="api-key">API Key <span class="label-hint">(must have "Allow to write" privilege)</span></label>
         <div class="input-with-toggle">
-          <input type="password" id="api-key" placeholder="Enter your API key">
+          <input type="password" id="api-key" placeholder="Enter your API key" autocomplete="new-password" data-1p-ignore data-bwignore>
           <button type="button" class="btn-icon" id="toggle-key" title="Show/hide API key">
             <span id="eye-icon">Show</span>
           </button>
         </div>
       </div>
       <div class="form-group google-creds-group">
-        <label>Google Drive <span class="label-hint">(optional &mdash; <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener" class="help-link">how to get credentials</a>)</span></label>
-        <input type="text" id="google-client-id" placeholder="Client ID">
+        <label>Google Drive <span class="label-hint">(optional &mdash; <span class="help-link" id="google-creds-help-link">how to get credentials</span>)</span></label>
+        <input type="text" id="google-client-id" placeholder="Client ID" autocomplete="off" data-1p-ignore data-bwignore>
         <div class="input-with-toggle" style="margin-top: 6px;">
-          <input type="password" id="google-client-secret" placeholder="Client Secret">
+          <input type="password" id="google-client-secret" placeholder="Client Secret" autocomplete="new-password" data-1p-ignore data-bwignore>
           <button type="button" class="btn-icon" id="toggle-secret" title="Show/hide secret">
             <span id="eye-icon-secret">Show</span>
           </button>
@@ -117,11 +117,11 @@
             </p>
             <div id="drive-setup-form" class="drive-setup-form hidden" onclick="event.stopPropagation()">
               <div class="inline-form">
-                <input type="text" id="drive-setup-client-id" placeholder="Google Client ID" onclick="event.stopPropagation()">
-                <input type="password" id="drive-setup-client-secret" placeholder="Client Secret" onclick="event.stopPropagation()">
+                <input type="text" id="drive-setup-client-id" placeholder="Google Client ID" onclick="event.stopPropagation()" autocomplete="off" data-1p-ignore data-bwignore>
+                <input type="password" id="drive-setup-client-secret" placeholder="Client Secret" onclick="event.stopPropagation()" autocomplete="new-password" data-1p-ignore data-bwignore>
                 <button class="btn btn-small btn-primary" id="btn-drive-setup-save">Save</button>
               </div>
-              <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener" class="drive-setup-help" onclick="event.stopPropagation()">How to get credentials</a>
+              <span class="drive-setup-help" id="drive-setup-help-link" onclick="event.stopPropagation()">How to get credentials</span>
             </div>
           </div>
         </div>

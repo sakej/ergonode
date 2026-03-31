@@ -59,6 +59,7 @@ impl From<&CredentialBlob> for CredentialBlobDto {
 pub struct CredentialStore {
     blob: RwLock<CredentialBlob>,
     dirty: AtomicBool,
+    legacy_migrated: AtomicBool,
 }
 
 impl CredentialStore {
@@ -66,20 +67,16 @@ impl CredentialStore {
         Self {
             blob: RwLock::new(CredentialBlob::default()),
             dirty: AtomicBool::new(false),
+            legacy_migrated: AtomicBool::new(false),
         }
     }
 
     /// Load all credentials from OS keychain (single read).
     /// Falls back to file if keychain unavailable.
-    /// Also migrates legacy keychain entries (old google-token:* keys, probe) on first load.
+    /// Exactly one keychain access — legacy migration only runs on first
+    /// save (not here) to avoid extra keychain prompts.
     pub async fn load_from_keychain(&self) -> Result<CredentialBlobDto, String> {
-        let mut blob = Self::read_blob()?;
-
-        // Migrate legacy Google token from old per-scope keychain entry
-        migrate_legacy_keychain_token(&mut blob);
-        // Clean up legacy probe keychain entry
-        cleanup_legacy_probe();
-
+        let blob = Self::read_blob()?;
         let dto = CredentialBlobDto::from(&blob);
         *self.blob.write().await = blob;
         self.dirty.store(false, Ordering::Release);
@@ -88,7 +85,16 @@ impl CredentialStore {
 
     /// Save current in-memory blob to OS keychain (single write).
     /// Falls back to file if keychain unavailable.
+    /// Also runs one-time legacy keychain cleanup (probe entry, old token entries)
+    /// bundled with the save so it doesn't add extra prompts.
     pub async fn save_to_keychain(&self) -> Result<(), String> {
+        // One-time legacy cleanup (runs in same keychain session as the write)
+        if !self.legacy_migrated.load(Ordering::Acquire) {
+            cleanup_legacy_probe();
+            migrate_legacy_keychain_token_cleanup_only();
+            self.legacy_migrated.store(true, Ordering::Release);
+        }
+
         let blob = self.blob.read().await;
         Self::write_blob(&blob)?;
         self.dirty.store(false, Ordering::Release);
@@ -273,12 +279,20 @@ impl CredentialStore {
     }
 
     fn read_blob() -> Result<CredentialBlob, String> {
-        // Try keychain first
+        // Try keychain first — exactly one get_password() call
+        eprintln!("[credentials] read_blob: about to call get_password — EXPECT 1 PROMPT");
         if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, KEYRING_KEY) {
-            if let Ok(json) = entry.get_password() {
-                if let Ok(blob) = serde_json::from_str::<CredentialBlob>(&json) {
-                    eprintln!("[credentials] Loaded from OS keychain");
-                    return Ok(blob);
+            match entry.get_password() {
+                Ok(json) => {
+                    eprintln!("[credentials] read_blob: get_password returned OK");
+                    if let Ok(blob) = serde_json::from_str::<CredentialBlob>(&json) {
+                        eprintln!("[credentials] Loaded from OS keychain");
+                        return Ok(blob);
+                    }
+                    eprintln!("[credentials] read_blob: JSON parse failed");
+                }
+                Err(e) => {
+                    eprintln!("[credentials] read_blob: get_password failed: {e}");
                 }
             }
         }
@@ -386,26 +400,12 @@ pub fn migrate_legacy_config(legacy_path: &std::path::Path) -> Option<Credential
     })
 }
 
-/// Migrate Google OAuth token from legacy keychain entry.
-pub fn migrate_legacy_keychain_token(blob: &mut CredentialBlob) -> bool {
+/// Delete legacy Google token keychain entry (cleanup only — does not read/migrate).
+pub fn migrate_legacy_keychain_token_cleanup_only() {
     let scope = "https://www.googleapis.com/auth/drive.readonly";
     let legacy_key = format!("google-token:{}", scope);
-
-    let token = keyring::Entry::new(KEYRING_SERVICE, &legacy_key)
-        .ok()
-        .and_then(|e| e.get_password().ok())
-        .and_then(|json| serde_json::from_str::<TokenInfo>(&json).ok());
-
-    if let Some(token) = token {
-        blob.google_tokens.insert(scope.to_string(), token);
-        // Clean up legacy entry
-        if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, &legacy_key) {
-            let _ = entry.delete_credential();
-        }
-        eprintln!("[credentials] Migrated legacy Google token");
-        true
-    } else {
-        false
+    if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, &legacy_key) {
+        let _ = entry.delete_credential();
     }
 }
 

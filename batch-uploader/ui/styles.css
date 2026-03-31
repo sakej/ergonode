@@ -1136,13 +1136,14 @@ input:focus {
 
 /* ---------- Google Credentials Section ---------- */
 
-.google-creds-group label .help-link {
+.help-link {
   color: var(--accent);
   text-decoration: none;
   font-weight: 400;
+  cursor: pointer;
 }
 
-.google-creds-group label .help-link:hover {
+.help-link:hover {
   text-decoration: underline;
 }
 
