@@ -20,7 +20,7 @@ Once approved:
 
 ### Runtime Client ID + Secret Input
 
-**Status:** Up next (after token persistence)
+**Status:** Up next
 
 Allow users to enter their own Google Client ID and Client Secret in the app UI. Store securely in OS keychain (same mechanism as OAuth token persistence). Remove the `.env` / build-time `option_env!()` dependency entirely.
 
@@ -48,5 +48,5 @@ Move the Ergonode API key from plaintext `config.json` to the OS keychain for co
 
 The Rust build produces 4 warnings:
 
-1. **`ImportResult` struct (google_drive.rs:307)** — dead code, leftover from the original "dump all files" approach. Was replaced by the in-app Drive browser which returns files individually via `list_folder` + `list_folder_recursive`. Safe to delete.
+1. **`ImportResult` struct (google_drive.rs:336)** — dead code, leftover from the original "dump all files" approach. Was replaced by the in-app Drive browser which returns files individually via `list_folder` + `list_folder_recursive`. Safe to delete.
 2. **3 dead code warnings in ergonode.rs** — pre-existing unused fields/functions. Need to audit and remove.
