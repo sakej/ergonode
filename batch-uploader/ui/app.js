@@ -248,6 +248,13 @@ function bindEvents() {
     invoke("open_url", { url: GOOGLE_CREDS_URL });
   });
 
+  // Auth overlay "Open manually" link
+  authOverlayLink.addEventListener("click", (e) => {
+    e.preventDefault();
+    const url = authOverlayLink.href;
+    if (url && url !== "#") invoke("open_url", { url });
+  });
+
   // Folder controls
   btnNewFolder.addEventListener("click", () => {
     newFolderForm.classList.remove("hidden");
@@ -264,8 +271,11 @@ function bindEvents() {
   });
   btnRefreshFolders.addEventListener("click", () => loadFolders());
 
-  // Drop zone click -> file picker
-  dropZone.addEventListener("click", handleFilePicker);
+  // Drop zone click -> file picker (ignore clicks on interactive children)
+  dropZone.addEventListener("click", (e) => {
+    if (e.target.closest(".drive-setup-form, .drive-link, .drive-setup-link")) return;
+    handleFilePicker();
+  });
 
   // Google Drive link
   driveLink.addEventListener("click", (e) => {
@@ -355,6 +365,12 @@ function bindEvents() {
 async function handleLoadKeychain() {
   try {
     const dto = await invoke("load_from_keychain");
+
+    // TEMPORARY BYPASS: Switch to text immediately before injection to defeat WebKit AutoFill prompts
+    const wasApiKeyHidden = apiKeyInput.type === "password";
+    const wasSecretHidden = googleClientSecretInput.type === "password";
+    apiKeyInput.type = "text";
+    googleClientSecretInput.type = "text";
     // Clear all credential fields before applying loaded values
     apiUrlInput.value = "";
     apiKeyInput.value = "";
@@ -364,6 +380,9 @@ async function handleLoadKeychain() {
     if (dto.api_key) apiKeyInput.value = dto.api_key;
     if (dto.google_client_id) googleClientIdInput.value = dto.google_client_id;
     if (dto.google_client_secret) googleClientSecretInput.value = dto.google_client_secret;
+    // Restore original password types instantly
+    if (wasApiKeyHidden) apiKeyInput.type = "password";
+    if (wasSecretHidden) googleClientSecretInput.type = "password";
     state.loadedFromKeychain = true;
     showStatus(connStatus, `Loaded from ${state.platformLabel}. Click Connect to proceed.`, "success");
   } catch (err) {
@@ -1221,6 +1240,11 @@ async function handleGoogleDrivePicker() {
       const result = await invoke("google_drive_auth");
       driveState.accessToken = result.access_token;
       btnGoogleSignOut.classList.remove("hidden");
+
+      if (state.loadedFromKeychain) {
+        invoke("save_to_keychain").catch(() => {});
+      }
+
       driveState.path = [{ id: "root", name: "My Drive" }];
       driveState.selected = new Set();
       driveModal.classList.remove("hidden");
@@ -1257,6 +1281,14 @@ async function handleGoogleDrivePicker() {
     if (cancelled) return;
     driveState.accessToken = result.access_token;
     btnGoogleSignOut.classList.remove("hidden");
+
+    // Securely persist the new token so the user doesn't have to auth again
+    if (state.loadedFromKeychain) {
+      await invoke("save_to_keychain").catch(() => {});
+    } else {
+      const saved = await showKeychainConsentModal("update");
+      if (saved) state.loadedFromKeychain = true;
+    }
   } catch (err) {
     authOverlay.classList.add("hidden");
     unlisten();

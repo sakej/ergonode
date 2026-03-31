@@ -383,6 +383,11 @@ pub async fn is_signed_in(store: &CredentialStore) -> bool {
 pub async fn sign_out(store: &CredentialStore) -> Result<(), String> {
     let token_info = store.delete_google_token(&[DRIVE_SCOPE]).await;
 
+    // Persist removal to keychain so a stale token doesn't survive reload
+    if let Err(e) = store.save_to_keychain().await {
+        eprintln!("[google-drive] Warning: could not persist token removal to keychain: {e}");
+    }
+
     // Best-effort revoke — try access token, fall back to refresh token
     if let Some(info) = token_info {
         let revoke_token = info.access_token.as_deref()
