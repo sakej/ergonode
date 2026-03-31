@@ -348,6 +348,11 @@ function bindEvents() {
 async function handleLoadKeychain() {
   try {
     const dto = await invoke("load_from_keychain");
+    // Clear all credential fields before applying loaded values
+    apiUrlInput.value = "";
+    apiKeyInput.value = "";
+    googleClientIdInput.value = "";
+    googleClientSecretInput.value = "";
     if (dto.api_url) apiUrlInput.value = dto.api_url;
     if (dto.api_key) apiKeyInput.value = dto.api_key;
     if (dto.google_client_id) googleClientIdInput.value = dto.google_client_id;

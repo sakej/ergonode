@@ -30,7 +30,9 @@ pub struct CredentialBlob {
     pub google_tokens: HashMap<String, TokenInfo>,
 }
 
-/// DTO sent to frontend — exposes has_google_token but not the token itself.
+/// DTO sent to frontend — exposes all fields except google_tokens
+/// (replaced by has_google_token boolean). api_key and google_client_secret
+/// are included so the frontend can populate form fields after keychain load.
 #[derive(Serialize)]
 pub struct CredentialBlobDto {
     pub api_url: Option<String>,
@@ -68,6 +70,8 @@ impl CredentialStore {
     }
 
     /// Check if keychain has stored credentials (single keychain access).
+    /// Note: On macOS unsigned dev builds, this triggers a keychain prompt.
+    /// Signed production builds cache keychain access for the session.
     pub fn keychain_has_credentials() -> bool {
         keyring::Entry::new(KEYRING_SERVICE, KEYRING_KEY)
             .and_then(|e| e.get_password())
@@ -188,6 +192,7 @@ impl CredentialStore {
         google_client_secret: Option<String>,
     ) {
         let mut blob = self.blob.write().await;
+        blob.version = 1;
         blob.api_url = Some(api_url);
         blob.api_key = Some(api_key);
         blob.google_client_id = google_client_id;
@@ -296,6 +301,12 @@ impl CredentialStore {
                     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
                 }
                 fs::write(&path, json).map_err(|e| e.to_string())?;
+                // Restrict file permissions to owner-only on Unix
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+                }
                 eprintln!("[credentials] Saved to file fallback");
                 Ok(())
             }
