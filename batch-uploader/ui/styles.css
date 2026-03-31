@@ -1066,9 +1066,15 @@ input:focus {
   cursor: pointer;
 }
 
+.drive-modal-footer .button-row {
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
 .drive-selected-count {
   font-size: 12px;
   color: var(--text-secondary);
+  white-space: nowrap;
 }
 
 .drive-list .folder-loading {
