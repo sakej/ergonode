@@ -216,6 +216,12 @@ impl CredentialStore {
         self.dirty.load(Ordering::Acquire)
     }
 
+    /// Load a pre-built blob into memory (used for migration).
+    pub async fn load_migrated_blob(&self, blob: CredentialBlob) {
+        *self.blob.write().await = blob;
+        self.dirty.store(true, Ordering::Release);
+    }
+
     /// Clear all in-memory credentials.
     pub async fn clear(&self) {
         *self.blob.write().await = CredentialBlob::default();

@@ -192,6 +192,20 @@ async function init() {
     state.platformLabel = "Keychain";
   }
 
+  // Run one-time legacy migration (old config.json → new keychain format)
+  try {
+    const migrated = await invoke("run_migration");
+    if (migrated) {
+      // Migration loaded credentials into backend memory — populate form
+      const dto = await invoke("get_credentials");
+      if (dto.api_url) apiUrlInput.value = dto.api_url;
+      if (dto.api_key) apiKeyInput.value = dto.api_key;
+      if (dto.google_client_id) googleClientIdInput.value = dto.google_client_id;
+      if (dto.google_client_secret) googleClientSecretInput.value = dto.google_client_secret;
+      showStatus(connStatus, "Migrated credentials from previous version. Click Connect to proceed.", "success");
+    }
+  } catch (_) {}
+
   // Check if keychain has stored credentials
   try {
     const hasCredentials = await invoke("keychain_has_credentials");
