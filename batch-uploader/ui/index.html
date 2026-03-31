@@ -30,9 +30,20 @@
           </button>
         </div>
       </div>
-      <div class="button-row">
+      <div class="form-group google-creds-group">
+        <label>Google Drive <span class="label-hint">(optional &mdash; <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener" class="help-link">how to get credentials</a>)</span></label>
+        <input type="text" id="google-client-id" placeholder="Client ID">
+        <div class="input-with-toggle" style="margin-top: 6px;">
+          <input type="password" id="google-client-secret" placeholder="Client Secret">
+          <button type="button" class="btn-icon" id="toggle-secret" title="Show/hide secret">
+            <span id="eye-icon-secret">Show</span>
+          </button>
+        </div>
+      </div>
+      <div class="button-row settings-buttons">
         <button class="btn btn-primary" id="btn-connect">Connect</button>
         <button class="btn btn-secondary" id="btn-clear">Clear Settings</button>
+        <button class="btn btn-secondary hidden" id="btn-load-keychain">Load from Keychain</button>
       </div>
       <div id="connection-status" class="status-message hidden"></div>
     </section>
@@ -101,6 +112,17 @@
               <span id="drive-link-separator" class="drive-separator hidden"> or </span>
               <span id="drive-link" class="drive-link hidden">import from Google Drive</span>
             </p>
+            <p id="drive-setup-link" class="drive-setup-link hidden">
+              <span class="link-text">Set up Google Drive</span>
+            </p>
+            <div id="drive-setup-form" class="drive-setup-form hidden" onclick="event.stopPropagation()">
+              <div class="inline-form">
+                <input type="text" id="drive-setup-client-id" placeholder="Google Client ID" onclick="event.stopPropagation()">
+                <input type="password" id="drive-setup-client-secret" placeholder="Client Secret" onclick="event.stopPropagation()">
+                <button class="btn btn-small btn-primary" id="btn-drive-setup-save">Save</button>
+              </div>
+              <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener" class="drive-setup-help" onclick="event.stopPropagation()">How to get credentials</a>
+            </div>
           </div>
         </div>
 
@@ -192,6 +214,18 @@
         </div>
         <div class="modal-actions">
           <button class="btn btn-ghost" id="auth-overlay-cancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Keychain Consent Modal -->
+    <div id="keychain-modal" class="modal-overlay hidden">
+      <div class="modal-card">
+        <h3 class="modal-title" id="keychain-modal-title">Save to Keychain?</h3>
+        <p class="modal-body" id="keychain-modal-body">Your credentials will be securely stored.</p>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" id="keychain-modal-skip">Not now</button>
+          <button class="btn btn-primary" id="keychain-modal-save">Save</button>
         </div>
       </div>
     </div>

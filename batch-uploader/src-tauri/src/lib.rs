@@ -82,6 +82,16 @@ async fn get_credentials(
 }
 
 #[tauri::command]
+async fn set_google_client(
+    store: tauri::State<'_, Arc<CredentialStore>>,
+    google_client_id: Option<String>,
+    google_client_secret: Option<String>,
+) -> Result<(), String> {
+    store.set_google_client(google_client_id, google_client_secret).await;
+    Ok(())
+}
+
+#[tauri::command]
 fn get_platform_label() -> &'static str {
     CredentialStore::platform_label()
 }
@@ -278,7 +288,7 @@ pub fn run() {
             load_settings, save_settings, clear_settings,
             // Credentials
             keychain_has_credentials, load_from_keychain, save_to_keychain,
-            delete_keychain_entry, set_credentials, get_credentials, get_platform_label,
+            delete_keychain_entry, set_credentials, set_google_client, get_credentials, get_platform_label,
             // Ergonode API
             test_connection, fetch_folders, create_folder, upload_file, get_file_size,
             scan_directory, is_directory, create_folders_batch, batch_delete,
