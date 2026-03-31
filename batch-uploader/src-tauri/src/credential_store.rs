@@ -99,15 +99,30 @@ impl CredentialStore {
 
     /// Delete the keychain entry entirely.
     pub fn delete_keychain_entry() -> Result<(), String> {
+        let mut errors = Vec::new();
+
         if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, KEYRING_KEY) {
-            let _ = entry.delete_credential();
+            if let Err(e) = entry.delete_credential() {
+                // NoEntry is fine — means already deleted
+                if !matches!(e, keyring::Error::NoEntry) {
+                    errors.push(format!("Keychain delete failed: {e}"));
+                }
+            }
         }
+
         // Also delete file fallback
         let path = Self::fallback_path();
         if path.exists() {
-            let _ = fs::remove_file(path);
+            if let Err(e) = fs::remove_file(&path) {
+                errors.push(format!("File delete failed: {e}"));
+            }
         }
-        Ok(())
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; "))
+        }
     }
 
     /// Update Ergonode credentials in memory.
