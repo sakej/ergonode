@@ -2,6 +2,7 @@ mod config;
 mod ergonode;
 mod fs_utils;
 mod google_drive;
+mod token_storage;
 
 use std::sync::Mutex;
 use tokio::sync::oneshot;
