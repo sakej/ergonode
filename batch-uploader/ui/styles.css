@@ -742,9 +742,14 @@ input:focus {
   width: 0%;
 }
 
+.file-progress-bar.downloading {
+  background: var(--amber);
+  width: 30%;
+}
+
 .file-progress-bar.uploading {
   background: var(--accent);
-  width: 10%;
+  width: 60%;
 }
 
 .file-progress-bar.done {
@@ -775,6 +780,7 @@ input:focus {
 }
 
 .file-status.queued { color: var(--text-tertiary); }
+.file-status.downloading { color: var(--amber); }
 .file-status.uploading { color: var(--accent); }
 .file-status.done { color: var(--green); }
 .file-status.failed { color: var(--red); }

@@ -1263,12 +1263,7 @@ function bindDriveEvents() {
 function renderFileList() {
   fileListEl.innerHTML = "";
 
-  // During upload: only show uploading, failed, skipped (hide queued and done)
-  const visibleFiles = state.uploading
-    ? state.files.filter((f) => f.status === "uploading" || f.status === "failed" || f.status === "skipped")
-    : state.files;
-
-  for (const file of visibleFiles) {
+  for (const file of state.files) {
     const row = document.createElement("div");
     row.className = "file-item";
     row.id = "file-" + file.id;
@@ -1354,6 +1349,7 @@ function renderFileList() {
 function statusLabel(file) {
   switch (file.status) {
     case "queued":     return "Queued";
+    case "downloading": return "Downloading...";
     case "uploading":  return "Uploading...";
     case "done":       return "Done";
     case "failed":     return file.error || "Failed";
@@ -1376,8 +1372,8 @@ function updateFileRow(file) {
     if (file.error) statusEl.title = file.error;
   }
 
-  // Re-render for action buttons (retry/remove)
-  if (file.status === "done" || file.status === "failed") {
+  // Re-render for action buttons (retry/remove) — only when not actively uploading
+  if (!state.uploading && (file.status === "done" || file.status === "failed")) {
     renderFileList();
   }
 }
@@ -1463,6 +1459,8 @@ function pumpQueue() {
 async function uploadSingleFile(file) {
   // Download Drive files first
   if (file.driveFileId && !file.isTempFile) {
+    file.status = "downloading";
+    updateFileRow(file);
     try {
       const tempPath = await invoke("google_drive_download", {
         accessToken: file.driveAccessToken,
@@ -1472,6 +1470,8 @@ async function uploadSingleFile(file) {
       file.path = tempPath;
       file.tempPath = tempPath;
       file.isTempFile = true;
+      file.status = "uploading";
+      updateFileRow(file);
     } catch (err) {
       file.status = "failed";
       file.error = "Drive download failed: " + err;
