@@ -35,11 +35,6 @@ fn clear_settings() -> Result<(), String> {
 // ---------- Credential management ----------
 
 #[tauri::command]
-fn keychain_has_credentials() -> bool {
-    CredentialStore::keychain_has_credentials()
-}
-
-#[tauri::command]
 async fn load_from_keychain(
     store: tauri::State<'_, Arc<CredentialStore>>,
 ) -> Result<CredentialBlobDto, String> {
@@ -98,36 +93,22 @@ fn get_platform_label() -> &'static str {
 
 // ---------- Legacy migration ----------
 
-/// Run one-time migration from legacy storage (old config.json + old keychain entries).
-/// Returns true if migration occurred and credentials were loaded into memory.
+/// Migrate credentials from legacy config.json (file read only — no keychain access).
+/// Returns true if legacy credentials were found and loaded into memory.
 #[tauri::command]
 async fn run_migration(
     store: tauri::State<'_, Arc<CredentialStore>>,
 ) -> Result<bool, String> {
-    // Skip if keychain already has unified credentials
-    if CredentialStore::keychain_has_credentials() {
-        credential_store::cleanup_legacy_probe();
-        return Ok(false);
-    }
-
-    // Try migrating from legacy config.json
     let config_path = config::config_file_path();
-    let mut blob = match config_path.and_then(|p| credential_store::migrate_legacy_config(&p)) {
+    let blob = match config_path.and_then(|p| credential_store::migrate_legacy_config(&p)) {
         Some(b) => b,
         None => return Ok(false),
     };
 
-    // Also try migrating legacy Google token from old keychain entry
-    credential_store::migrate_legacy_keychain_token(&mut blob);
-
-    // Clean up legacy probe keychain entry
-    credential_store::cleanup_legacy_probe();
-
-    // Load migrated blob into memory
     let has_creds = blob.api_url.is_some();
     store.load_migrated_blob(blob).await;
 
-    eprintln!("[migration] Migrated legacy credentials into memory");
+    eprintln!("[migration] Migrated legacy config.json credentials into memory");
     Ok(has_creds)
 }
 
@@ -322,7 +303,7 @@ pub fn run() {
             // Config
             load_settings, save_settings, clear_settings,
             // Credentials
-            keychain_has_credentials, load_from_keychain, save_to_keychain,
+            load_from_keychain, save_to_keychain,
             delete_keychain_entry, set_credentials, set_google_client, get_credentials, get_platform_label,
             // Migration
             run_migration,

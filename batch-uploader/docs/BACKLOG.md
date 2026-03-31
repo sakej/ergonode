@@ -76,10 +76,8 @@ The `ExitRequested` shutdown hook calls `save_to_keychain_sync()` which uses `to
 
 **Mitigation:** The window is extremely narrow (token refresh writes are sub-millisecond). A full fix would require switching to `std::sync::RwLock` or restructuring the shutdown hook to run in an async context.
 
-### Unsigned dev builds trigger keychain prompts on startup
+### Done: No keychain access on startup
 
-**Status:** Known limitation
+**Status:** Fixed
 
-On macOS, unsigned dev builds trigger a keychain authorization prompt when `keychain_has_credentials()` is called during `init()`. This contradicts the "user-initiated only" goal.
-
-**Mitigation:** Signed production builds cache keychain access for the session — this only affects development. A possible fix is to use a local hint file instead of probing the keychain, but this adds complexity for marginal benefit.
+Previously `keychain_has_credentials()` was called on init, triggering macOS keychain prompts on unsigned dev builds. Fixed by removing the startup probe — "Load from Keychain" button is always visible, and keychain is only accessed when the user explicitly clicks it. Legacy keychain migration (old google-token entries, probe cleanup) deferred to `load_from_keychain`.

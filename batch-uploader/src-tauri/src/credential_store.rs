@@ -69,19 +69,17 @@ impl CredentialStore {
         }
     }
 
-    /// Check if keychain has stored credentials (single keychain access).
-    /// Note: On macOS unsigned dev builds, this triggers a keychain prompt.
-    /// Signed production builds cache keychain access for the session.
-    pub fn keychain_has_credentials() -> bool {
-        keyring::Entry::new(KEYRING_SERVICE, KEYRING_KEY)
-            .and_then(|e| e.get_password())
-            .is_ok()
-    }
-
     /// Load all credentials from OS keychain (single read).
     /// Falls back to file if keychain unavailable.
+    /// Also migrates legacy keychain entries (old google-token:* keys, probe) on first load.
     pub async fn load_from_keychain(&self) -> Result<CredentialBlobDto, String> {
-        let blob = Self::read_blob()?;
+        let mut blob = Self::read_blob()?;
+
+        // Migrate legacy Google token from old per-scope keychain entry
+        migrate_legacy_keychain_token(&mut blob);
+        // Clean up legacy probe keychain entry
+        cleanup_legacy_probe();
+
         let dto = CredentialBlobDto::from(&blob);
         *self.blob.write().await = blob;
         self.dirty.store(false, Ordering::Release);
