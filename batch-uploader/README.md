@@ -11,13 +11,14 @@ Built with [Tauri](https://tauri.app/) (Rust backend + vanilla HTML/CSS/JS front
 - **Folder structure recreation** — drop a folder and recreate its tree in Ergonode automatically
 - **Upload options** — flat upload (no subfolders) and include root folder toggles
 - **Revert upload** — undo the last upload batch (delete files and/or folders) with batched GraphQL mutations
-- **70+ supported file types** — images, videos, documents, 3D models, CAD, Adobe files, and more
+- **55+ supported file types** — images, videos, documents, 3D models, CAD, Adobe files, and more
 - **Folder tree** browser — pick or create destination folders directly from your Ergonode instance
 - **Rate limit handling** — respects Ergonode's 250 req/min media limit with automatic exponential backoff on 429 responses
-- **Concurrent uploads** — up to 4 parallel uploads with dynamic concurrency adjustment
+- **Concurrent uploads** — up to 4 parallel uploads with dynamic concurrency adjustment; **single connection** toggle to limit to 1 at a time
 - **Progress tracking** — per-file status with real Ergonode error messages
-- **Google auth persistence** — OAuth tokens stored securely in OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service) with file fallback; sign out of Google from the connected bar
-- **Settings persistence** — remembers your API URL, key, and upload preferences between sessions
+- **Google Drive sign-out** — revoke OAuth token and remove from keychain from the connected bar
+- **Credential storage** — API URL, API key, Google credentials, and OAuth tokens stored as a single blob in OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service) with encrypted file fallback; prompted to save on first connect
+- **Settings persistence** — remembers upload preferences between sessions
 - **Stop & resume** — cancel uploads mid-flight, retry failed files
 - **Cross-platform** — Windows 10+, macOS, Linux
 
@@ -82,7 +83,7 @@ xattr -cr /Applications/"Ergonode Batch Uploader.app"
 
 ## Google Drive Setup
 
-Google Drive import is optional. Without a Client ID, the app works normally — the Drive link is simply hidden.
+Google Drive import is optional. Without a Client ID, the app works normally — the Drive link is replaced by a **Set up Google Drive** link in the drop zone, where you can enter credentials at runtime without rebuilding.
 
 ### Creating your own Client ID
 
@@ -93,9 +94,9 @@ Google Drive import is optional. Without a Client ID, the app works normally —
    - Search for "Google Drive API" → click **Enable**
 4. Configure the **OAuth consent screen**:
    - Go to **APIs & Services** → **OAuth consent screen**
-   - Choose **External** user type
+   - Choose **Internal** user type (if available — requires Google Workspace; otherwise choose **External**)
    - Fill in the required fields (app name, support email)
-   - Add scope: `https://www.googleapis.com/auth/drive.readonly`
+   - Add scope: `https://www.googleapis.com/auth/drive.file`
    - Add yourself as a test user (required while app is in "Testing" status)
 5. Create **OAuth credentials**:
    - Go to **APIs & Services** → **Credentials**
@@ -106,13 +107,20 @@ Google Drive import is optional. Without a Client ID, the app works normally —
 
 ### Using your Client ID
 
+**Option A — Runtime entry (no rebuild needed):**
+After connecting to Ergonode, click **Set up Google Drive** in the drop zone and paste your Client ID and Client Secret. These are saved to the OS keychain alongside your other credentials.
+
+**Option B — Compile-time embed:**
 Create a `.env` file in the `batch-uploader/` directory:
 
 ```
 GOOGLE_CLIENT_ID=your-client-id-here.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-client-secret-here
 ```
 
-Then build or run the app — the Client ID is embedded at compile time.
+Then build or run the app — both values are embedded at compile time. Runtime credentials take priority over compile-time values.
+
+You can also enter the Client ID and Client Secret in the **Connection Settings** card under "Google Drive" before connecting.
 
 > **Testing mode:** While your Google Cloud project is in "Testing" status, only users listed as test users can authorize. This is fine for personal use. Publishing to production requires [Google verification](https://support.google.com/cloud/answer/9110914) (4–6 weeks).
 
@@ -160,7 +168,7 @@ On receiving a 429 (Too Many Requests), the app pauses with exponential backoff 
 - **Backend**: Rust + Tauri 2.x + reqwest (multipart HTTP) + google-drive3 SDK + keyring (OS credential store)
 - **Frontend**: Vanilla HTML/CSS/JS (no framework)
 - **API**: Ergonode GraphQL (`multimediaCreate` mutation, multipart POST), Google Drive API v3
-- **Config**: JSON file in OS config directory (settings), OS keychain for OAuth tokens
+- **Config**: JSON file in OS config directory (non-sensitive settings), OS keychain for all credentials (unified blob: API key, Google client credentials, OAuth tokens)
 
 ## License
 
