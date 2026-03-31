@@ -908,3 +908,166 @@ input:focus {
 }
 
 .file-status.reverted { color: var(--text-tertiary); }
+
+/* ---------- Google Drive Browser Modal ---------- */
+
+.drive-modal-card {
+  max-width: 520px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.drive-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.drive-modal-header .modal-title {
+  margin: 0;
+}
+
+.drive-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.drive-crumb {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.drive-crumb:hover {
+  text-decoration: underline;
+}
+
+.drive-crumb-active {
+  color: var(--text);
+  cursor: default;
+}
+
+.drive-crumb-active:hover {
+  text-decoration: none;
+}
+
+.drive-crumb-sep {
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
+
+.drive-list {
+  flex: 1;
+  min-height: 200px;
+  max-height: 50vh;
+  overflow-y: auto;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  scrollbar-width: thin;
+  scrollbar-color: #e0e0e0 transparent;
+}
+
+.drive-list:hover {
+  scrollbar-color: #d1d5db transparent;
+}
+
+.drive-list::-webkit-scrollbar { width: 5px; }
+.drive-list::-webkit-scrollbar-track { background: transparent; }
+.drive-list::-webkit-scrollbar-thumb { background: #e0e0e0; border-radius: 3px; }
+.drive-list:hover::-webkit-scrollbar-thumb { background: #d1d5db; }
+
+.drive-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background var(--transition);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.drive-item:last-child {
+  border-bottom: none;
+}
+
+.drive-item:hover {
+  background: var(--bg);
+}
+
+.drive-item-check {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.drive-item-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+  width: 18px;
+  text-align: center;
+}
+
+.drive-item-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.drive-item-size {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.drive-item.is-folder .drive-item-name {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.drive-modal-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+  gap: 8px;
+}
+
+.drive-select-all {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.drive-select-all input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.drive-selected-count {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.drive-list .folder-loading {
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}

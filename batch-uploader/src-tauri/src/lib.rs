@@ -97,8 +97,26 @@ fn is_google_drive_available() -> bool {
 }
 
 #[tauri::command]
-async fn google_drive_pick_files() -> Result<google_drive::PickerResult, String> {
-    google_drive::pick_and_list_files().await
+async fn google_drive_auth() -> Result<google_drive::AuthResult, String> {
+    let access_token = google_drive::authenticate().await?;
+    Ok(google_drive::AuthResult { access_token })
+}
+
+#[tauri::command]
+async fn google_drive_list_folder(
+    access_token: String,
+    folder_id: String,
+) -> Result<Vec<google_drive::DriveItem>, String> {
+    google_drive::list_folder(&access_token, &folder_id).await
+}
+
+#[tauri::command]
+async fn google_drive_list_folder_recursive(
+    access_token: String,
+    folder_id: String,
+    folder_name: String,
+) -> Result<Vec<google_drive::DriveFileInfo>, String> {
+    google_drive::list_folder_recursive_flat(&access_token, &folder_id, &folder_name).await
 }
 
 #[tauri::command]
@@ -122,7 +140,8 @@ pub fn run() {
             load_settings, save_settings, clear_settings,
             test_connection, fetch_folders, create_folder, upload_file, get_file_size,
             scan_directory, is_directory, create_folders_batch, batch_delete,
-            is_google_drive_available, google_drive_pick_files,
+            is_google_drive_available, google_drive_auth,
+            google_drive_list_folder, google_drive_list_folder_recursive,
             google_drive_download, google_drive_delete_temp
         ])
         .run(tauri::generate_context!())

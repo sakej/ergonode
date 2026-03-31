@@ -149,6 +149,33 @@
       </div>
     </div>
 
+    <!-- Google Drive Browser Modal -->
+    <div id="drive-modal" class="modal-overlay hidden">
+      <div class="modal-card drive-modal-card">
+        <div class="drive-modal-header">
+          <h3 class="modal-title">Google Drive</h3>
+          <button class="btn btn-small btn-ghost" id="drive-modal-close">&times;</button>
+        </div>
+        <div id="drive-breadcrumb" class="drive-breadcrumb">
+          <span class="drive-crumb drive-crumb-active" data-id="root">My Drive</span>
+        </div>
+        <div id="drive-list" class="drive-list">
+          <div class="folder-loading">Loading...</div>
+        </div>
+        <div class="drive-modal-footer">
+          <label class="drive-select-all">
+            <input type="checkbox" id="drive-select-all-check">
+            <span>Select all files</span>
+          </label>
+          <div class="button-row">
+            <span id="drive-selected-count" class="drive-selected-count">0 selected</span>
+            <button class="btn btn-ghost" id="drive-modal-cancel">Cancel</button>
+            <button class="btn btn-primary" id="drive-import" disabled>Import</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Revert Upload Confirmation Modal -->
     <div id="revert-modal" class="modal-overlay hidden">
       <div class="modal-card">

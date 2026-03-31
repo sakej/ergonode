@@ -146,6 +146,14 @@ const revertModalCancel  = $("#revert-modal-cancel");
 const revertModalConfirm = $("#revert-modal-confirm");
 const driveLink          = $("#drive-link");
 const driveLinkSeparator = $("#drive-link-separator");
+const driveModal         = $("#drive-modal");
+const driveList          = $("#drive-list");
+const driveBreadcrumb    = $("#drive-breadcrumb");
+const driveSelectAll     = $("#drive-select-all-check");
+const driveSelectedCount = $("#drive-selected-count");
+const driveImportBtn     = $("#drive-import");
+const driveModalCancel   = $("#drive-modal-cancel");
+const driveModalClose    = $("#drive-modal-close");
 
 // ---------- Init ----------
 
@@ -241,6 +249,8 @@ function bindEvents() {
   includeRootEl.addEventListener("change", () => {
     localStorage.setItem("includeRoot", includeRootEl.checked);
   });
+
+  bindDriveEvents();
 }
 
 // ---------- Folder Modal ----------
@@ -1000,15 +1010,23 @@ async function addFoldersByPath(dirPaths) {
 
 // ---------- Google Drive Import ----------
 
+// Drive browser state (separate from main state)
+const driveState = {
+  accessToken: null,
+  path: [],           // [{id, name}, ...] — breadcrumb trail
+  items: [],          // current folder's items from API
+  selected: new Set(), // selected item IDs (files only)
+};
+
 async function handleGoogleDrivePicker() {
-  // Show spinner
+  // Show spinner during auth
   dropZone.classList.add("hidden");
   scanSpinner.classList.remove("hidden");
   scanSpinnerText.textContent = "Waiting for Google authorization...";
 
-  let result;
   try {
-    result = await invoke("google_drive_pick_files");
+    const result = await invoke("google_drive_auth");
+    driveState.accessToken = result.access_token;
   } catch (err) {
     scanSpinner.classList.add("hidden");
     dropZone.classList.remove("hidden");
@@ -1016,116 +1034,200 @@ async function handleGoogleDrivePicker() {
     return;
   }
 
-  const driveFiles = result.files;
-  const accessToken = result.access_token;
+  scanSpinner.classList.add("hidden");
+  dropZone.classList.remove("hidden");
 
-  if (!driveFiles || driveFiles.length === 0) {
-    scanSpinner.classList.add("hidden");
-    dropZone.classList.remove("hidden");
-    showInlineStatus("No supported files found in Google Drive selection");
+  // Open Drive browser modal at root
+  driveState.path = [{ id: "root", name: "My Drive" }];
+  driveState.selected = new Set();
+  driveModal.classList.remove("hidden");
+  await driveLoadFolder("root");
+}
+
+async function driveLoadFolder(folderId) {
+  driveList.innerHTML = '<div class="folder-loading">Loading...</div>';
+  driveRenderBreadcrumb();
+  driveUpdateFooter();
+
+  try {
+    const items = await invoke("google_drive_list_folder", {
+      accessToken: driveState.accessToken,
+      folderId,
+    });
+    driveState.items = items;
+    driveRenderItems();
+  } catch (err) {
+    driveList.innerHTML = `<div class="folder-loading" style="color:var(--red)">Error: ${escapeHtml(String(err))}</div>`;
+  }
+}
+
+function driveRenderBreadcrumb() {
+  driveBreadcrumb.innerHTML = "";
+  driveState.path.forEach((crumb, i) => {
+    if (i > 0) {
+      const sep = document.createElement("span");
+      sep.className = "drive-crumb-sep";
+      sep.textContent = "›";
+      driveBreadcrumb.appendChild(sep);
+    }
+    const el = document.createElement("span");
+    const isLast = i === driveState.path.length - 1;
+    el.className = "drive-crumb" + (isLast ? " drive-crumb-active" : "");
+    el.textContent = crumb.name;
+    if (!isLast) {
+      el.addEventListener("click", () => {
+        driveState.path = driveState.path.slice(0, i + 1);
+        driveLoadFolder(crumb.id);
+      });
+    }
+    driveBreadcrumb.appendChild(el);
+  });
+}
+
+function driveRenderItems() {
+  driveList.innerHTML = "";
+
+  if (driveState.items.length === 0) {
+    driveList.innerHTML = '<div class="folder-loading">No supported files in this folder</div>';
+    driveUpdateFooter();
     return;
   }
 
-  scanSpinnerText.textContent = `Found ${driveFiles.length} file(s) from Google Drive`;
+  for (const item of driveState.items) {
+    const row = document.createElement("div");
+    row.className = "drive-item" + (item.is_folder ? " is-folder" : "");
 
-  // Check if any files have folder structure
-  const hasStructure = driveFiles.some(f => f.relative_dir.length > 0);
-
-  scanSpinner.classList.add("hidden");
-  uploadControls.classList.remove("hidden");
-
-  if (hasStructure) {
-    // Show folder modal with options (reuse existing modal)
-    folderModalOptions.classList.remove("hidden");
-
-    const destName = state.selectedFolder
-      ? state.selectedFolder.split("/").pop()
-      : "/ (root)";
-
-    const subfolderCount = new Set(
-      driveFiles.map(f => f.relative_dir).filter(d => d.length > 0)
-    ).size;
-
-    const msg = `${driveFiles.length} file(s) from Google Drive will be uploaded to "${destName}".\n\n${subfolderCount} subfolder(s) detected.`;
-    const confirmed = await showFolderModal(msg);
-    if (!confirmed) {
-      resetDropState();
-      return;
+    if (!item.is_folder) {
+      const check = document.createElement("input");
+      check.type = "checkbox";
+      check.className = "drive-item-check";
+      check.checked = driveState.selected.has(item.id);
+      check.addEventListener("change", () => {
+        if (check.checked) driveState.selected.add(item.id);
+        else driveState.selected.delete(item.id);
+        driveUpdateFooter();
+      });
+      row.appendChild(check);
+    } else {
+      const spacer = document.createElement("span");
+      spacer.style.width = "16px";
+      spacer.style.flexShrink = "0";
+      row.appendChild(spacer);
     }
 
-    // Read toggles after confirmation
-    const includeRoot = includeRootEl.checked;
-    const flatUpload = flatUploadEl.checked;
+    const icon = document.createElement("span");
+    icon.className = "drive-item-icon";
+    icon.textContent = item.is_folder ? "\uD83D\uDCC1" : "\uD83D\uDCC4";
+    row.appendChild(icon);
 
-    // Apply flat upload — clear relative_dirs
-    if (flatUpload && !includeRoot) {
-      for (const f of driveFiles) f.relative_dir = "";
-    } else if (flatUpload && includeRoot) {
-      // Keep only root folder name (first segment)
-      for (const f of driveFiles) {
-        const root = f.relative_dir.split("/")[0];
-        f.relative_dir = root || "";
-      }
+    const name = document.createElement("span");
+    name.className = "drive-item-name";
+    name.textContent = item.name;
+    name.title = item.name;
+    row.appendChild(name);
+
+    if (!item.is_folder && item.size > 0) {
+      const size = document.createElement("span");
+      size.className = "drive-item-size";
+      size.textContent = formatSize(item.size);
+      row.appendChild(size);
     }
-    // includeRoot without flat: relative_dirs already have folder names from Rust
 
-    // Collect subfolders and create in Ergonode
-    const leafDirs = new Set(
-      driveFiles.map(f => f.relative_dir).filter(d => d.length > 0)
-    );
-    const allPaths = new Set();
-    for (const leaf of leafDirs) {
-      const parts = leaf.split("/");
-      for (let i = 1; i <= parts.length; i++) {
-        allPaths.add(parts.slice(0, i).join("/"));
-      }
+    if (item.is_folder) {
+      row.addEventListener("click", () => {
+        driveState.path.push({ id: item.id, name: item.name });
+        driveLoadFolder(item.id);
+      });
+    } else {
+      // Click row to toggle checkbox
+      row.addEventListener("click", (e) => {
+        if (e.target.type === "checkbox") return;
+        const check = row.querySelector(".drive-item-check");
+        if (check) {
+          check.checked = !check.checked;
+          if (check.checked) driveState.selected.add(item.id);
+          else driveState.selected.delete(item.id);
+          driveUpdateFooter();
+        }
+      });
     }
-    const subfolders = [...allPaths];
 
-    if (subfolders.length > 0) {
-      showInlineStatus(`Creating ${subfolders.length} folder(s) in Ergonode...`);
-      try {
-        await invoke("create_folders_batch", {
-          apiUrl: state.apiUrl,
-          apiKey: state.apiKey,
-          basePath: state.selectedFolder || null,
-          relativePaths: subfolders,
-        });
-      } catch (err) {
-        showInlineError("Failed to create folders: " + err);
-        return;
-      }
-      hideInlineStatus();
-
-      state.pendingCreatedFolders = subfolders.map(rel =>
-        state.selectedFolder ? state.selectedFolder + "/" + rel : rel
-      );
-    }
-  } else {
-    folderModalOptions.classList.add("hidden");
+    driveList.appendChild(row);
   }
 
-  // Queue files — download from Drive on upload (lazy download)
-  for (const driveFile of driveFiles) {
-    let targetFolder = null;
-    if (driveFile.relative_dir) {
-      targetFolder = state.selectedFolder
-        ? state.selectedFolder + "/" + driveFile.relative_dir
-        : driveFile.relative_dir;
-    } else {
-      targetFolder = state.selectedFolder || null;
-    }
+  driveUpdateFooter();
+}
+
+function driveUpdateFooter() {
+  const count = driveState.selected.size;
+  driveSelectedCount.textContent = count + " selected";
+  driveImportBtn.disabled = count === 0;
+  driveImportBtn.textContent = count > 0 ? `Import (${count})` : "Import";
+
+  // Update select-all checkbox state
+  const fileItems = driveState.items.filter(i => !i.is_folder);
+  if (fileItems.length === 0) {
+    driveSelectAll.checked = false;
+    driveSelectAll.indeterminate = false;
+  } else {
+    const selectedInView = fileItems.filter(i => driveState.selected.has(i.id)).length;
+    driveSelectAll.checked = selectedInView === fileItems.length;
+    driveSelectAll.indeterminate = selectedInView > 0 && selectedInView < fileItems.length;
+  }
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
+  if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + " MB";
+  return (bytes / 1073741824).toFixed(1) + " GB";
+}
+
+function driveCloseBrowser() {
+  driveModal.classList.add("hidden");
+  driveState.accessToken = null;
+  driveState.items = [];
+  driveState.selected = new Set();
+  driveState.path = [];
+}
+
+async function driveImportSelected() {
+  // Gather selected files from all items we've seen
+  const selectedFiles = [];
+  // We need to collect from current view — user may have selected across folders
+  // For simplicity, selected IDs are tracked globally. We need the item data.
+  // Re-fetch isn't needed: we only import what's visible + previously selected.
+  // But we need item data for selected IDs. Store items by ID.
+  const allItems = driveState.items.filter(i => driveState.selected.has(i.id));
+
+  // Close the Drive modal
+  driveModal.classList.add("hidden");
+
+  const accessToken = driveState.accessToken;
+
+  if (allItems.length === 0) {
+    // Selections were from other folders — list them
+    // For now, just queue what's selected in current view
+    driveCloseBrowser();
+    return;
+  }
+
+  // Queue files for upload
+  dropZone.classList.add("hidden");
+  uploadControls.classList.remove("hidden");
+
+  for (const item of allItems) {
+    const targetFolder = state.selectedFolder || null;
 
     const file = {
       id: state.nextFileId++,
-      name: driveFile.name,
-      path: "",                     // filled after download
-      status: driveFile.size > MAX_FILE_SIZE ? "skipped" : "queued",
-      error: driveFile.size > MAX_FILE_SIZE ? "File exceeds 100 MB limit" : null,
+      name: item.name,
+      path: "",
+      status: item.size > MAX_FILE_SIZE ? "skipped" : "queued",
+      error: item.size > MAX_FILE_SIZE ? "File exceeds 100 MB limit" : null,
       targetFolder,
-      relativeDir: driveFile.relative_dir,
-      // Drive-specific fields
-      driveFileId: driveFile.id,
+      relativeDir: "",
+      driveFileId: item.id,
       driveAccessToken: accessToken,
       isTempFile: false,
       tempPath: null,
@@ -1134,9 +1236,26 @@ async function handleGoogleDrivePicker() {
     state.files.push(file);
   }
 
+  driveCloseBrowser();
   renderFileList();
   updateCounter();
-  dropZone.classList.add("hidden");
+}
+
+// Drive modal event bindings (called once from bindEvents)
+function bindDriveEvents() {
+  driveModalCancel.addEventListener("click", driveCloseBrowser);
+  driveModalClose.addEventListener("click", driveCloseBrowser);
+  driveImportBtn.addEventListener("click", driveImportSelected);
+
+  driveSelectAll.addEventListener("change", () => {
+    const fileItems = driveState.items.filter(i => !i.is_folder);
+    if (driveSelectAll.checked) {
+      for (const item of fileItems) driveState.selected.add(item.id);
+    } else {
+      for (const item of fileItems) driveState.selected.delete(item.id);
+    }
+    driveRenderItems();
+  });
 }
 
 // ---------- File List Rendering ----------

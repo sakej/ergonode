@@ -1,14 +1,12 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use google_drive3::DriveHub;
 use google_drive3::hyper_rustls;
 use google_drive3::hyper_util;
 use google_drive3::yup_oauth2;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Custom delegate that opens the browser for OAuth.
-/// yup_oauth2 only prints the URL to stdout by default.
 struct BrowserDelegate;
 
 impl yup_oauth2::authenticator_delegate::InstalledFlowDelegate for BrowserDelegate {
@@ -21,11 +19,7 @@ impl yup_oauth2::authenticator_delegate::InstalledFlowDelegate for BrowserDelega
             eprintln!("[google-drive] Opening browser for auth: {url}");
             if let Err(e) = open::that(url) {
                 eprintln!("[google-drive] Failed to open browser: {e}");
-                eprintln!("[google-drive] Please open this URL manually: {url}");
-            } else {
-                eprintln!("[google-drive] Browser opened successfully");
             }
-            // For HTTPRedirect flow, the return value is not used
             Ok(String::new())
         })
     }
@@ -35,25 +29,16 @@ impl yup_oauth2::authenticator_delegate::InstalledFlowDelegate for BrowserDelega
 const CLIENT_ID: Option<&str> = option_env!("GOOGLE_CLIENT_ID");
 const CLIENT_SECRET: Option<&str> = option_env!("GOOGLE_CLIENT_SECRET");
 
-/// Type alias for the connector used throughout this module.
-type HttpsConnector = hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>;
+const DRIVE_SCOPE: &str = "https://www.googleapis.com/auth/drive.readonly";
 
-/// File info returned to the frontend
+/// A single item (file or folder) in a Drive listing
 #[derive(Serialize, Clone, Debug)]
-pub struct DriveFileInfo {
+pub struct DriveItem {
     pub id: String,
     pub name: String,
     pub size: u64,
     pub mime_type: String,
-    /// Relative folder path, e.g. "photos/winter". Empty = top level.
-    pub relative_dir: String,
-}
-
-/// Result from the picker flow — files + access token for subsequent downloads
-#[derive(Serialize)]
-pub struct PickerResult {
-    pub files: Vec<DriveFileInfo>,
-    pub access_token: String,
+    pub is_folder: bool,
 }
 
 /// Check if the Google Drive feature is available (Client ID is embedded)
@@ -87,22 +72,20 @@ fn is_google_native_format(mime_type: &str) -> bool {
         && mime_type != "application/vnd.google-apps.folder"
 }
 
-/// Run the full OAuth + file listing flow.
-/// Returns a list of files ready for download.
-pub async fn pick_and_list_files() -> Result<PickerResult, String> {
-    eprintln!("[google-drive] pick_and_list_files called");
+// ---------- OAuth ----------
+
+/// Run OAuth flow only — opens browser, user authorizes, returns access token.
+pub async fn authenticate() -> Result<String, String> {
     let client_id = CLIENT_ID.ok_or("Google Drive is not configured")?;
-    eprintln!("[google-drive] Client ID present: {}", !client_id.is_empty());
     if client_id.is_empty() {
         return Err("Google Drive Client ID is empty".to_string());
     }
 
-    // Build ApplicationSecret for yup-oauth2
     let secret = yup_oauth2::ApplicationSecret {
         client_id: client_id.to_string(),
         client_secret: CLIENT_SECRET.unwrap_or("").to_string(),
         token_uri: "https://oauth2.googleapis.com/token".to_string(),
-        auth_uri: "https://accounts.google.com/o/oauth2/v2/auth?prompt=consent&trigger_onepick=true&allow_multiple=true".to_string(),
+        auth_uri: "https://accounts.google.com/o/oauth2/v2/auth?prompt=consent".to_string(),
         redirect_uris: Vec::new(),
         project_id: None,
         client_email: None,
@@ -110,111 +93,130 @@ pub async fn pick_and_list_files() -> Result<PickerResult, String> {
         client_x509_cert_url: None,
     };
 
-    // Build authenticator — opens browser, listens on localhost
-    let auth_connector = hyper_rustls::HttpsConnectorBuilder::new()
+    let connector = hyper_rustls::HttpsConnectorBuilder::new()
         .with_native_roots()
         .map_err(|e| format!("TLS setup failed: {e}"))?
         .https_or_http()
         .enable_http2()
         .build();
-    let auth_client = hyper_util::client::legacy::Client::builder(
+    let client = hyper_util::client::legacy::Client::builder(
         hyper_util::rt::TokioExecutor::new(),
     )
-    .build(auth_connector);
+    .build(connector);
 
     let auth = yup_oauth2::InstalledFlowAuthenticator::with_client(
         secret,
         yup_oauth2::InstalledFlowReturnMethod::HTTPRedirect,
-        yup_oauth2::client::CustomHyperClientBuilder::from(auth_client),
+        yup_oauth2::client::CustomHyperClientBuilder::from(client),
     )
     .flow_delegate(Box::new(BrowserDelegate))
     .build()
     .await
     .map_err(|e| format!("OAuth setup failed: {e}"))?;
 
-    eprintln!("[google-drive] Auth built, building DriveHub...");
+    // Request a token — this triggers the browser auth flow
+    let token = auth
+        .token(&[DRIVE_SCOPE])
+        .await
+        .map_err(|e| format!("OAuth failed: {e}"))?;
 
-    // Build the Drive API hub (separate client instance)
-    let hub_connector = hyper_rustls::HttpsConnectorBuilder::new()
-        .with_native_roots()
-        .map_err(|e| format!("TLS setup failed: {e}"))?
-        .https_or_http()
-        .enable_http2()
-        .build();
-    let hub_client = hyper_util::client::legacy::Client::builder(
-        hyper_util::rt::TokioExecutor::new(),
-    )
-    .build(hub_connector);
+    let access_token = token
+        .token()
+        .ok_or("No access token returned")?
+        .to_string();
 
-    let hub = DriveHub::new(hub_client, auth);
+    eprintln!("[google-drive] Auth complete, got access token");
+    Ok(access_token)
+}
 
-    eprintln!("[google-drive] DriveHub built, listing files...");
+// ---------- Drive API via reqwest ----------
 
-    // List all files the user granted access to (paginated)
-    let mut all_files: Vec<DriveFileInfo> = Vec::new();
+#[derive(Deserialize)]
+struct FileListResponse {
+    files: Option<Vec<FileResource>>,
+    #[serde(rename = "nextPageToken")]
+    next_page_token: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct FileResource {
+    id: Option<String>,
+    name: Option<String>,
+    size: Option<String>,
+    #[serde(rename = "mimeType")]
+    mime_type: Option<String>,
+}
+
+/// List contents of a Drive folder (or root if folder_id is "root").
+/// Returns folders + supported files. Skips Google-native formats.
+pub async fn list_folder(access_token: &str, folder_id: &str) -> Result<Vec<DriveItem>, String> {
+    let client = reqwest::Client::new();
+    let mut all_items: Vec<DriveItem> = Vec::new();
     let mut page_token: Option<String> = None;
-    let mut total_raw = 0usize;
-    let mut skipped_native = 0usize;
-    let mut skipped_folder = 0usize;
-    let mut skipped_ext = 0usize;
 
     loop {
-        let mut req = hub
-            .files()
-            .list()
-            .q("mimeType != 'application/vnd.google-apps.folder' and 'me' in owners and trashed = false")
-            .page_size(1000)
-            .param("fields", "nextPageToken,files(id,name,size,mimeType)")
-            .add_scope("https://www.googleapis.com/auth/drive.readonly");
+        let q = format!("'{}' in parents and trashed = false", folder_id);
+        let mut params = vec![
+            ("q", q.as_str()),
+            ("pageSize", "1000"),
+            ("fields", "nextPageToken,files(id,name,size,mimeType)"),
+            ("orderBy", "folder,name"),
+        ];
 
+        let pt_string;
         if let Some(ref token) = page_token {
-            req = req.page_token(token);
+            pt_string = token.clone();
+            params.push(("pageToken", &pt_string));
         }
 
-        eprintln!("[google-drive] Calling files().list().doit()...");
-        let doit_result = req.doit().await;
-        if let Err(ref e) = doit_result {
-            eprintln!("[google-drive] doit() error: {e:?}");
+        let resp = client
+            .get("https://www.googleapis.com/drive/v3/files")
+            .bearer_auth(access_token)
+            .query(&params)
+            .send()
+            .await
+            .map_err(|e| format!("Drive API error: {e}"))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!("Drive API failed ({status}): {body}"));
         }
-        let (_, file_list) = doit_result
-            .map_err(|e| format!("Failed to list Drive files: {e}"))?;
+
+        let file_list: FileListResponse = resp
+            .json()
+            .await
+            .map_err(|e| format!("Drive API parse error: {e}"))?;
 
         if let Some(files) = file_list.files {
-            eprintln!("[google-drive] Page returned {} files", files.len());
             for file in files {
-                total_raw += 1;
                 let name = file.name.unwrap_or_default();
-                let mime_type = file.mime_type.clone().unwrap_or_default();
+                let mime_type = file.mime_type.unwrap_or_default();
                 let id = file.id.unwrap_or_default();
 
-                eprintln!("[google-drive]   file: {name} | mime: {mime_type} | id: {id}");
-
+                // Skip Google-native formats (Docs, Sheets, etc.)
                 if is_google_native_format(&mime_type) {
-                    skipped_native += 1;
-                    eprintln!("[google-drive]     -> skipped (Google native format)");
                     continue;
                 }
 
-                if mime_type == "application/vnd.google-apps.folder" {
-                    // Skip folders for now — listing all Drive files is already slow.
-                    // TODO: add Drive folder browser UI so user picks a specific folder to import
+                let is_folder = mime_type == "application/vnd.google-apps.folder";
+
+                // Skip unsupported file extensions (but keep folders)
+                if !is_folder && !is_supported_extension(&name) {
                     continue;
                 }
 
-                if !is_supported_extension(&name) {
-                    skipped_ext += 1;
-                    eprintln!("[google-drive]     -> skipped (unsupported extension)");
-                    continue;
-                }
+                let size: u64 = file
+                    .size
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
 
-                let size = file.size.unwrap_or(0) as u64;
-
-                all_files.push(DriveFileInfo {
+                all_items.push(DriveItem {
                     id,
                     name,
                     size,
                     mime_type,
-                    relative_dir: String::new(),
+                    is_folder,
                 });
             }
         }
@@ -225,100 +227,70 @@ pub async fn pick_and_list_files() -> Result<PickerResult, String> {
         }
     }
 
-    eprintln!(
-        "[google-drive] Done. Total raw: {total_raw}, accepted: {}, skipped: native={skipped_native} folder={skipped_folder} ext={skipped_ext}",
-        all_files.len()
-    );
-
-    // Get the access token for later downloads (auth already happened via files().list())
-    let scopes = &["https://www.googleapis.com/auth/drive.readonly"];
-    let access_token = hub
-        .auth
-        .get_token(scopes)
-        .await
-        .map_err(|e| format!("Failed to get access token: {e}"))?
-        .ok_or_else(|| "No access token returned".to_string())?;
-
-    eprintln!("[google-drive] Got access token for downloads");
-
-    Ok(PickerResult { files: all_files, access_token })
+    Ok(all_items)
 }
 
-/// Recursively list all files in a Drive folder, building relative_dir paths.
-/// Uses Box::pin to allow async recursion.
-fn list_folder_recursive<'a>(
-    hub: &'a DriveHub<HttpsConnector>,
-    folder_id: &'a str,
-    folder_path: &'a str,
-) -> Pin<Box<dyn Future<Output = Result<Vec<DriveFileInfo>, String>> + Send + 'a>> {
-    Box::pin(async move {
-        let mut results = Vec::new();
-        let mut page_token: Option<String> = None;
+/// Recursively list all files in a folder, building relative_dir paths.
+/// Used when user selects a folder for import.
+pub async fn list_folder_recursive_flat(
+    access_token: &str,
+    folder_id: &str,
+    folder_path: &str,
+) -> Result<Vec<DriveFileInfo>, String> {
+    let items = list_folder(access_token, folder_id).await?;
+    let mut results: Vec<DriveFileInfo> = Vec::new();
 
-        loop {
-            let query = format!("'{}' in parents and trashed = false", folder_id);
-            let mut req = hub
-                .files()
-                .list()
-                .q(&query)
-                .page_size(1000)
-                .param("fields", "nextPageToken,files(id,name,size,mimeType)")
-                .add_scope("https://www.googleapis.com/auth/drive.readonly");
-
-            if let Some(ref token) = page_token {
-                req = req.page_token(token);
-            }
-
-            let (_, file_list) = req
-                .doit()
-                .await
-                .map_err(|e| format!("Failed to list folder '{}': {}", folder_path, e))?;
-
-            if let Some(files) = file_list.files {
-                for file in files {
-                    let name = file.name.unwrap_or_default();
-                    let mime_type = file.mime_type.clone().unwrap_or_default();
-                    let id = file.id.unwrap_or_default();
-
-                    if is_google_native_format(&mime_type) {
-                        continue;
-                    }
-
-                    if mime_type == "application/vnd.google-apps.folder" {
-                        let sub_path = format!("{}/{}", folder_path, name);
-                        let sub_files = list_folder_recursive(hub, &id, &sub_path).await?;
-                        results.extend(sub_files);
-                        continue;
-                    }
-
-                    if !is_supported_extension(&name) {
-                        continue;
-                    }
-
-                    let size = file.size.unwrap_or(0) as u64;
-
-                    results.push(DriveFileInfo {
-                        id,
-                        name,
-                        size,
-                        mime_type,
-                        relative_dir: folder_path.to_string(),
-                    });
-                }
-            }
-
-            page_token = file_list.next_page_token;
-            if page_token.is_none() {
-                break;
-            }
+    for item in items {
+        if item.is_folder {
+            let sub_path = if folder_path.is_empty() {
+                item.name.clone()
+            } else {
+                format!("{}/{}", folder_path, item.name)
+            };
+            let sub_files = Box::pin(list_folder_recursive_flat(access_token, &item.id, &sub_path)).await?;
+            results.extend(sub_files);
+        } else {
+            results.push(DriveFileInfo {
+                id: item.id,
+                name: item.name,
+                size: item.size,
+                mime_type: item.mime_type,
+                relative_dir: folder_path.to_string(),
+            });
         }
+    }
 
-        Ok(results)
-    })
+    Ok(results)
 }
+
+// ---------- Types for the frontend ----------
+
+/// File info with relative_dir for folder structure
+#[derive(Serialize, Clone, Debug)]
+pub struct DriveFileInfo {
+    pub id: String,
+    pub name: String,
+    pub size: u64,
+    pub mime_type: String,
+    pub relative_dir: String,
+}
+
+/// Auth result
+#[derive(Serialize)]
+pub struct AuthResult {
+    pub access_token: String,
+}
+
+/// Import result — files ready for download + upload
+#[derive(Serialize)]
+pub struct ImportResult {
+    pub files: Vec<DriveFileInfo>,
+    pub access_token: String,
+}
+
+// ---------- Download ----------
 
 /// Download a Drive file to OS temp directory.
-/// Returns the absolute path of the downloaded temp file.
 pub async fn download_file(
     file_id: &str,
     file_name: &str,
