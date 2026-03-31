@@ -176,6 +176,23 @@
       </div>
     </div>
 
+    <!-- Google Auth Overlay -->
+    <div id="auth-overlay" class="modal-overlay hidden">
+      <div class="modal-card auth-overlay-card">
+        <div class="auth-overlay-content">
+          <div class="spinner"></div>
+          <p class="auth-overlay-title">Authorizing with Google...</p>
+          <p class="auth-overlay-hint">
+            A browser tab should have opened.
+            <a id="auth-overlay-link" class="hidden" href="#" target="_blank" rel="noopener">Open manually</a>
+          </p>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" id="auth-overlay-cancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Revert Upload Confirmation Modal -->
     <div id="revert-modal" class="modal-overlay hidden">
       <div class="modal-card">

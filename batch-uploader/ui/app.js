@@ -30,6 +30,7 @@ const state = {
 
   // Revert ledger (session-scoped)
   revertMode: false,
+  revertSummary: false,     // true while revert summary is shown in counter
   uploadLedger: null,       // { uploadedFiles: [{name, folderPath}], createdFolders: [path] }
   pendingCreatedFolders: [], // temp: folders created in pre-flight, moved to ledger after upload
 };
@@ -154,6 +155,9 @@ const driveSelectedCount = $("#drive-selected-count");
 const driveImportBtn     = $("#drive-import");
 const driveModalCancel   = $("#drive-modal-cancel");
 const driveModalClose    = $("#drive-modal-close");
+const authOverlay       = $("#auth-overlay");
+const authOverlayLink   = $("#auth-overlay-link");
+const authOverlayCancel = $("#auth-overlay-cancel");
 
 // ---------- Init ----------
 
@@ -334,6 +338,7 @@ async function handleRevert() {
   // Disable buttons during revert
   btnUpload.disabled = true;
   btnClearFiles.disabled = true;
+  rateLimitMsg.classList.add("hidden");
 
   const summary = { filesOk: 0, filesFail: 0, foldersOk: 0, foldersFail: 0, errors: [] };
 
@@ -345,7 +350,8 @@ async function handleRevert() {
 
     for (let i = 0; i < filePaths.length; i += DELETE_BATCH_SIZE) {
       const batch = filePaths.slice(i, i + DELETE_BATCH_SIZE);
-      showInlineStatus(`Deleting files... ${i}/${filePaths.length}`);
+      uploadCounter.textContent = `Deleting files… ${i}/${filePaths.length}`;
+      uploadCounter.style.color = "var(--amber)";
 
       try {
         const result = await invoke("batch_delete", {
@@ -382,7 +388,8 @@ async function handleRevert() {
         summary.errors.push(`Batch error: ${err}`);
       }
     }
-    showInlineStatus(`Deleting files... ${filePaths.length}/${filePaths.length}`);
+    uploadCounter.textContent = `Deleting files… ${filePaths.length}/${filePaths.length}`;
+    uploadCounter.style.color = "var(--amber)";
   }
 
   // Phase 2: Delete folders (deepest first)
@@ -396,7 +403,8 @@ async function handleRevert() {
 
     for (let i = 0; i < sorted.length; i += DELETE_BATCH_SIZE) {
       const batch = sorted.slice(i, i + DELETE_BATCH_SIZE);
-      showInlineStatus(`Deleting folders... ${i}/${sorted.length}`);
+      uploadCounter.textContent = `Deleting folders… ${i}/${sorted.length}`;
+      uploadCounter.style.color = "var(--amber)";
 
       try {
         const result = await invoke("batch_delete", {
@@ -427,7 +435,8 @@ async function handleRevert() {
   if (choice.deleteFolders) parts.push(`${summary.foldersOk}/${summary.foldersOk + summary.foldersFail} folders deleted`);
   const msg = "Reverted: " + parts.join(", ");
 
-  // Show revert summary in the counter label
+  // Show revert summary in the counter label (protected from updateCounter reset)
+  state.revertSummary = true;
   if (summary.filesFail === 0 && summary.foldersFail === 0) {
     uploadCounter.textContent = msg;
     uploadCounter.style.color = "var(--green)";
@@ -1019,23 +1028,45 @@ const driveState = {
 };
 
 async function handleGoogleDrivePicker() {
-  // Show spinner during auth
-  dropZone.classList.add("hidden");
-  scanSpinner.classList.remove("hidden");
-  scanSpinnerText.textContent = "Waiting for Google authorization...";
+  // Show auth overlay
+  authOverlayLink.href = "#";
+  authOverlayLink.classList.add("hidden");
+  authOverlay.classList.remove("hidden");
+
+  // Listen for the OAuth URL from the backend (for fallback link)
+  const unlisten = await listen("google-drive-auth-url", (event) => {
+    authOverlayLink.href = event.payload;
+    authOverlayLink.classList.remove("hidden");
+  });
+
+  // Set up cancel handler
+  let cancelled = false;
+  const onCancel = () => {
+    cancelled = true;
+    invoke("google_drive_auth_cancel").catch(() => {});
+    authOverlay.classList.add("hidden");
+    unlisten();
+  };
+  authOverlayCancel.addEventListener("click", onCancel, { once: true });
 
   try {
     const result = await invoke("google_drive_auth");
+    if (cancelled) return;
     driveState.accessToken = result.access_token;
   } catch (err) {
-    scanSpinner.classList.add("hidden");
-    dropZone.classList.remove("hidden");
-    showInlineError("Google Drive: " + err);
+    authOverlay.classList.add("hidden");
+    unlisten();
+    authOverlayCancel.removeEventListener("click", onCancel);
+    if (!cancelled) {
+      showInlineError("Google Drive: " + err);
+    }
     return;
   }
 
-  scanSpinner.classList.add("hidden");
-  dropZone.classList.remove("hidden");
+  // Dismiss overlay
+  authOverlay.classList.add("hidden");
+  unlisten();
+  authOverlayCancel.removeEventListener("click", onCancel);
 
   // Open Drive browser modal at root
   driveState.path = [{ id: "root", name: "My Drive" }];
@@ -1330,6 +1361,7 @@ function renderFileList() {
       removeBtn.title = "Remove";
       removeBtn.addEventListener("click", () => {
         state.files = state.files.filter((f) => f.id !== file.id);
+        state.revertSummary = false;
         renderFileList();
         updateCounter();
         if (state.files.length === 0) {
@@ -1379,6 +1411,7 @@ function updateFileRow(file) {
 }
 
 function updateCounter() {
+  if (state.revertSummary) return; // preserve revert message
   const total = state.files.length;
   const done = state.files.filter((f) => f.status === "done").length;
   uploadCounter.textContent = done + " / " + total + " complete";
@@ -1397,6 +1430,7 @@ function clearFiles() {
   state.files = [];
   state.uploadLedger = null;
   state.pendingCreatedFolders = [];
+  state.revertSummary = false;
   exitRevertMode();
   fileListEl.innerHTML = "";
   uploadControls.classList.add("hidden");
@@ -1417,6 +1451,7 @@ function startUploadQueue() {
   state.paused = false;
   state.activeUploads = 0;
   state.uploadLedger = null;
+  state.revertSummary = false;
   exitRevertMode();
   btnUpload.classList.add("hidden");
   btnClearFiles.classList.add("hidden");
