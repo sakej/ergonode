@@ -16,6 +16,7 @@ Built with [Tauri](https://tauri.app/) (Rust backend + vanilla HTML/CSS/JS front
 - **Rate limit handling** — respects Ergonode's 250 req/min media limit with automatic exponential backoff on 429 responses
 - **Concurrent uploads** — up to 4 parallel uploads with dynamic concurrency adjustment
 - **Progress tracking** — per-file status with real Ergonode error messages
+- **Google auth persistence** — OAuth tokens stored securely in OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service) with file fallback; sign out of Google from the connected bar
 - **Settings persistence** — remembers your API URL, key, and upload preferences between sessions
 - **Stop & resume** — cancel uploads mid-flight, retry failed files
 - **Cross-platform** — Windows 10+, macOS, Linux
@@ -94,7 +95,7 @@ Google Drive import is optional. Without a Client ID, the app works normally —
    - Go to **APIs & Services** → **OAuth consent screen**
    - Choose **External** user type
    - Fill in the required fields (app name, support email)
-   - Add scope: `https://www.googleapis.com/auth/drive.file`
+   - Add scope: `https://www.googleapis.com/auth/drive.readonly`
    - Add yourself as a test user (required while app is in "Testing" status)
 5. Create **OAuth credentials**:
    - Go to **APIs & Services** → **Credentials**
@@ -113,13 +114,7 @@ GOOGLE_CLIENT_ID=your-client-id-here.apps.googleusercontent.com
 
 Then build or run the app — the Client ID is embedded at compile time.
 
-> **Testing mode:** While your Google Cloud project is in "Testing" status, only users listed as test users can authorize. This is fine for personal use. Publishing to production requires [Google verification](https://support.google.com/cloud/answer/9110914).
-
-### Current limitations
-
-- **Files only** — folder picking from Google Drive is not yet supported (requires `drive.readonly` scope, which needs Google app verification). Users can select individual files via the Picker.
-- **Session-only auth** — no refresh tokens are stored. Each "import from Google Drive" click starts a fresh sign-in.
-- **Token expiry** — Google access tokens last ~1 hour. Very large imports may require re-initiating the Drive flow.
+> **Testing mode:** While your Google Cloud project is in "Testing" status, only users listed as test users can authorize. This is fine for personal use. Publishing to production requires [Google verification](https://support.google.com/cloud/answer/9110914) (4–6 weeks).
 
 ## Building from Source
 
@@ -162,10 +157,10 @@ On receiving a 429 (Too Many Requests), the app pauses with exponential backoff 
 
 ## Tech Stack
 
-- **Backend**: Rust + Tauri 2.x + reqwest (multipart HTTP) + google-drive3 SDK
+- **Backend**: Rust + Tauri 2.x + reqwest (multipart HTTP) + google-drive3 SDK + keyring (OS credential store)
 - **Frontend**: Vanilla HTML/CSS/JS (no framework)
 - **API**: Ergonode GraphQL (`multimediaCreate` mutation, multipart POST), Google Drive API v3
-- **Config**: JSON file in OS config directory
+- **Config**: JSON file in OS config directory (settings), OS keychain for OAuth tokens
 
 ## License
 
