@@ -427,14 +427,15 @@ async function handleRevert() {
   if (choice.deleteFolders) parts.push(`${summary.foldersOk}/${summary.foldersOk + summary.foldersFail} folders deleted`);
   const msg = "Reverted: " + parts.join(", ");
 
+  // Show revert summary in the counter label
   if (summary.filesFail === 0 && summary.foldersFail === 0) {
-    showInlineStatus(msg);
-    rateLimitMsg.style.color = "var(--green)";
+    uploadCounter.textContent = msg;
+    uploadCounter.style.color = "var(--green)";
   } else {
-    showInlineError(msg);
+    uploadCounter.textContent = msg;
+    uploadCounter.style.color = "var(--red)";
+    uploadCounter.title = summary.errors.join("\n");
     console.warn("[revert] Failures:", summary.errors);
-    // Show details in a title tooltip on the status message
-    rateLimitMsg.title = summary.errors.join("\n");
   }
 
   // Clear ledger and re-enable buttons
@@ -443,7 +444,6 @@ async function handleRevert() {
   btnUpload.disabled = false;
   btnClearFiles.disabled = false;
   renderFileList();
-  updateCounter();
 
   // Refresh folder tree if folders were deleted
   if (choice.deleteFolders) {
@@ -1382,6 +1382,8 @@ function updateCounter() {
   const total = state.files.length;
   const done = state.files.filter((f) => f.status === "done").length;
   uploadCounter.textContent = done + " / " + total + " complete";
+  uploadCounter.style.color = "";
+  uploadCounter.title = "";
 }
 
 function clearFiles() {
