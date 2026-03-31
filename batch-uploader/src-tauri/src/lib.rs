@@ -165,6 +165,16 @@ fn google_drive_delete_temp(path: String) {
     google_drive::delete_temp_file(&path);
 }
 
+#[tauri::command]
+fn google_drive_is_signed_in() -> bool {
+    google_drive::is_signed_in()
+}
+
+#[tauri::command]
+async fn google_drive_sign_out() -> Result<(), String> {
+    google_drive::sign_out().await
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -175,7 +185,8 @@ pub fn run() {
             scan_directory, is_directory, create_folders_batch, batch_delete,
             is_google_drive_available, google_drive_auth, google_drive_auth_cancel,
             google_drive_list_folder, google_drive_list_folder_recursive,
-            google_drive_download, google_drive_delete_temp
+            google_drive_download, google_drive_delete_temp,
+            google_drive_is_signed_in, google_drive_sign_out
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

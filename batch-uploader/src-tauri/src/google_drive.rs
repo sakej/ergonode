@@ -379,6 +379,39 @@ pub async fn download_file(
     Ok(temp_path.to_string_lossy().to_string())
 }
 
+// ---------- Sign out ----------
+
+/// Check if a Google OAuth token exists in storage.
+pub fn is_signed_in() -> bool {
+    let storage = KeychainTokenStorage::new();
+    storage.has_token(&[DRIVE_SCOPE])
+}
+
+/// Sign out of Google Drive — delete cached token and revoke it.
+pub async fn sign_out() -> Result<(), String> {
+    let storage = KeychainTokenStorage::new();
+    let token_info = storage.delete_token(&[DRIVE_SCOPE]);
+
+    // Best-effort revoke — try access token, fall back to refresh token
+    if let Some(info) = token_info {
+        let revoke_token = info.access_token.as_deref()
+            .or(info.refresh_token.as_deref());
+
+        if let Some(token) = revoke_token {
+            let client = reqwest::Client::new();
+            let _ = client
+                .post("https://oauth2.googleapis.com/revoke")
+                .form(&[("token", token)])
+                .send()
+                .await;
+            eprintln!("[google-drive] Token revoked");
+        }
+    }
+
+    eprintln!("[google-drive] Signed out");
+    Ok(())
+}
+
 /// Delete a temp file (silently ignore if not found).
 /// Only deletes files within the OS temp directory that were created by this app.
 pub fn delete_temp_file(path: &str) {
