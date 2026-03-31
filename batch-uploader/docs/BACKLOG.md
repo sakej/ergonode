@@ -1,41 +1,5 @@
 # Backlog
 
-## Google Drive Integration
-
-### Pending: Google OAuth App Verification
-
-**Status:** Blocked — requires Google review
-
-The app currently uses the `drive.readonly` scope (Internal app type). To make the app available to external users, it needs:
-
-1. **Change OAuth consent screen app type to "External"** in [Google Cloud Console](https://console.cloud.google.com/auth/consent)
-2. **Submit for Google verification** — required for restricted scopes like `drive.readonly`
-3. **Verification timeline:** 4–6 weeks depending on scopes used
-
-Once approved:
-- External users can authorize without the "unverified app" warning
-- Folder recursion in the Drive browser is already implemented and working
-
-**Reference:** [Google OAuth verification docs](https://support.google.com/cloud/answer/9110914)
-
-### Done: Runtime Client ID + Secret Input
-
-**Status:** Done (unified-credentials branch)
-
-Implemented as part of the unified credential management system. Users can enter Google Client ID and Secret in the Connection Settings card or via the "Set up Google Drive" inline form in the drop zone. Stored in the unified keychain blob. Build-time `option_env!()` kept as fallback.
-
-### Done: Ergonode API Key Migration to Keychain
-
-**Status:** Done (unified-credentials branch)
-
-API key now stored in the unified keychain blob alongside all other credentials. Legacy config.json migration runs automatically on first launch. Config.json now only holds non-sensitive data (folder_path).
-
-### Done: Clean up compiler warnings
-
-**Status:** Done (v1.4.0 + unified-credentials branch)
-
-Dead code removed in v1.4.0. One remaining warning for `set_ergonode_credentials` — intentionally kept as public API.
-
 ## Performance
 
 ### Shared reqwest::Client for connection pooling
@@ -48,13 +12,19 @@ Every Ergonode API command (`test_connection`, `fetch_folders`, `upload_file`, e
 
 **Scope:** Modify `ergonode.rs` to accept a shared client, or store one in Tauri state alongside `CredentialStore`.
 
+### Remove dead `set_ergonode_credentials` method
+
+**Status:** Planned
+
+`CredentialStore::set_ergonode_credentials()` in `credential_store.rs:133` has no callers — all credential setting goes through `set_all()`. Should be removed to eliminate the compiler warning.
+
 ## UX
 
 ### "Clear Settings" should offer to clear keychain
 
 **Status:** Planned
 
-Currently "Clear Settings" only clears the config.json and form fields. The keychain entry persists, so "Load from Keychain" still appears on next launch. Users who expect "clear" to mean "clear everything" may be confused.
+Currently "Clear Settings" only clears config.json (folder_path) and form fields. The keychain entry persists, so "Load from Keychain" still works on next launch. Users who expect "clear" to mean "clear everything" may be confused.
 
 **Fix:** Either add a separate "Delete saved credentials" button, or show a confirmation dialog asking whether to also clear the keychain entry.
 
@@ -62,7 +32,7 @@ Currently "Clear Settings" only clears the config.json and form fields. The keyc
 
 **Status:** Planned
 
-`app.js` is ~1750 lines in a single file. Should be split into focused modules (e.g., `state.js`, `connection.js`, `upload.js`, `drive.js`, `modals.js`).
+`app.js` is ~1900 lines in a single file. Should be split into focused modules (e.g., `state.js`, `connection.js`, `upload.js`, `drive.js`, `modals.js`).
 
 **Scope:** Split during next major frontend change. Use ES modules or a simple concatenation build step.
 
@@ -76,8 +46,24 @@ The `ExitRequested` shutdown hook calls `save_to_keychain_sync()` which uses `to
 
 **Mitigation:** The window is extremely narrow (token refresh writes are sub-millisecond). A full fix would require switching to `std::sync::RwLock` or restructuring the shutdown hook to run in an async context.
 
-### Done: No keychain access on startup
+## Completed
 
-**Status:** Fixed
+### v1.5.0
 
-Previously `keychain_has_credentials()` was called on init, triggering macOS keychain prompts on unsigned dev builds. Fixed by removing the startup probe — "Load from Keychain" button is always visible, and keychain is only accessed when the user explicitly clicks it. Legacy keychain migration (old google-token entries, probe cleanup) deferred to `load_from_keychain`.
+- **Unified credential management** — all credentials in a single keychain blob with legacy migration
+- **Runtime Google Client ID/Secret entry** — via drop zone form or Connection Settings card
+- **Autofill suppression** — disabled WebKit, 1Password, Bitwarden autofill on credential inputs
+- **Legacy migration guard** — runs once per session, not on every save
+- **Google sign-out persists to keychain** — fixes 401 on reload after sign-out
+- **"Open manually" auth link fixed** — uses `open_url` command in Tauri webview
+- **File picker guard** — clicking Drive setup inputs no longer opens file picker
+- **No keychain access on startup** — removed probe; "Load from Keychain" always visible, keychain accessed only on explicit click
+
+### v1.4.0
+
+- **OAuth token persistence** — stored in OS keychain with file fallback
+- **Silent re-auth** — cached tokens reused without browser prompt
+- **Google sign-out** — revoke token from connected bar
+- **CSP and security hardening** — GraphQL escaping, restricted temp file deletion
+- **Auth overlay** — spinner, cancel, fallback link
+- **Compiler warnings cleaned up** — dead code removed
