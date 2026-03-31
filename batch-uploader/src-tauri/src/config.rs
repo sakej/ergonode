@@ -5,15 +5,16 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppConfig {
     #[serde(default)]
-    pub api_url: String,
-    #[serde(default)]
-    pub api_key: String,
-    #[serde(default)]
     pub folder_path: Option<String>,
 }
 
 fn config_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("ergonode-uploader").join("config.json"))
+}
+
+/// Expose config file path for legacy migration.
+pub fn config_file_path() -> Option<PathBuf> {
+    config_path()
 }
 
 pub fn load_config() -> AppConfig {

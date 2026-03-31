@@ -201,6 +201,16 @@ impl CredentialStore {
         CredentialBlobDto::from(&*blob)
     }
 
+    /// Save current in-memory blob to OS keychain (synchronous).
+    /// Used for shutdown hook where async context may be unavailable.
+    pub fn save_to_keychain_sync(&self) -> Result<(), String> {
+        let blob = self.blob.try_read()
+            .map_err(|_| "Could not acquire lock for shutdown save")?;
+        Self::write_blob(&blob)?;
+        self.dirty.store(false, Ordering::Release);
+        Ok(())
+    }
+
     /// Check if in-memory blob has unsaved changes.
     pub fn is_dirty(&self) -> bool {
         self.dirty.load(Ordering::Acquire)
