@@ -3,8 +3,14 @@ mod ergonode;
 mod fs_utils;
 mod google_drive;
 
+use std::sync::Mutex;
+use tokio::sync::oneshot;
+
 use config::AppConfig;
 use ergonode::{ErgonodeClient, FolderInfo, UploadResult, BatchDeleteResult};
+
+/// Holds the cancel sender for an in-progress Google Drive auth flow.
+struct AuthCancelState(Mutex<Option<oneshot::Sender<()>>>);
 
 #[tauri::command]
 fn load_settings() -> AppConfig {
@@ -97,9 +103,34 @@ fn is_google_drive_available() -> bool {
 }
 
 #[tauri::command]
-async fn google_drive_auth() -> Result<google_drive::AuthResult, String> {
-    let access_token = google_drive::authenticate().await?;
+async fn google_drive_auth(
+    app: tauri::AppHandle,
+    cancel_state: tauri::State<'_, AuthCancelState>,
+) -> Result<google_drive::AuthResult, String> {
+    let (tx, rx) = oneshot::channel();
+    {
+        let mut guard = cancel_state.0.lock().unwrap();
+        // Cancel any in-flight auth before starting a new one
+        if let Some(old_tx) = guard.take() {
+            let _ = old_tx.send(());
+        }
+        *guard = Some(tx);
+    }
+
+    let result = google_drive::authenticate(app, rx).await;
+
+    // Clear sender after auth completes (success or fail)
+    *cancel_state.0.lock().unwrap() = None;
+
+    let access_token = result?;
     Ok(google_drive::AuthResult { access_token })
+}
+
+#[tauri::command]
+fn google_drive_auth_cancel(cancel_state: tauri::State<'_, AuthCancelState>) {
+    if let Some(tx) = cancel_state.0.lock().unwrap().take() {
+        let _ = tx.send(());
+    }
 }
 
 #[tauri::command]
@@ -136,11 +167,12 @@ fn google_drive_delete_temp(path: String) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .manage(AuthCancelState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             load_settings, save_settings, clear_settings,
             test_connection, fetch_folders, create_folder, upload_file, get_file_size,
             scan_directory, is_directory, create_folders_batch, batch_delete,
-            is_google_drive_available, google_drive_auth,
+            is_google_drive_available, google_drive_auth, google_drive_auth_cancel,
             google_drive_list_folder, google_drive_list_folder_recursive,
             google_drive_download, google_drive_delete_temp
         ])

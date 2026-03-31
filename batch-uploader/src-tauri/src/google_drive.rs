@@ -5,9 +5,13 @@ use google_drive3::hyper_rustls;
 use google_drive3::hyper_util;
 use google_drive3::yup_oauth2;
 use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter, Manager};
+use tokio::sync::oneshot;
 
-/// Custom delegate that opens the browser for OAuth.
-struct BrowserDelegate;
+/// Custom delegate that opens the browser for OAuth and emits the URL to the frontend.
+struct BrowserDelegate {
+    app: AppHandle,
+}
 
 impl yup_oauth2::authenticator_delegate::InstalledFlowDelegate for BrowserDelegate {
     fn present_user_url<'a>(
@@ -15,8 +19,13 @@ impl yup_oauth2::authenticator_delegate::InstalledFlowDelegate for BrowserDelega
         url: &'a str,
         _need_code: bool,
     ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>> {
+        let app = self.app.clone();
         Box::pin(async move {
             eprintln!("[google-drive] Opening browser for auth: {url}");
+
+            // Emit URL to frontend for the fallback link
+            let _ = app.emit("google-drive-auth-url", url);
+
             if let Err(e) = open::that(url) {
                 eprintln!("[google-drive] Failed to open browser: {e}");
             }
@@ -74,8 +83,9 @@ fn is_google_native_format(mime_type: &str) -> bool {
 
 // ---------- OAuth ----------
 
-/// Run OAuth flow only — opens browser, user authorizes, returns access token.
-pub async fn authenticate() -> Result<String, String> {
+/// Run OAuth flow — opens browser, user authorizes, returns access token.
+/// Supports cancellation via the provided oneshot receiver.
+pub async fn authenticate(app: AppHandle, cancel_rx: oneshot::Receiver<()>) -> Result<String, String> {
     let client_id = CLIENT_ID.ok_or("Google Drive is not configured")?;
     if client_id.is_empty() {
         return Err("Google Drive Client ID is empty".to_string());
@@ -109,21 +119,32 @@ pub async fn authenticate() -> Result<String, String> {
         yup_oauth2::InstalledFlowReturnMethod::HTTPRedirect,
         yup_oauth2::client::CustomHyperClientBuilder::from(client),
     )
-    .flow_delegate(Box::new(BrowserDelegate))
+    .flow_delegate(Box::new(BrowserDelegate { app: app.clone() }))
     .build()
     .await
     .map_err(|e| format!("OAuth setup failed: {e}"))?;
 
-    // Request a token — this triggers the browser auth flow
-    let token = auth
-        .token(&[DRIVE_SCOPE])
-        .await
-        .map_err(|e| format!("OAuth failed: {e}"))?;
+    // Race: auth token vs cancel signal.
+    // Dropping auth.token() on cancel is safe — yup_oauth2's internal HTTP
+    // server runs in a spawned task that shuts itself down when its channels close.
+    let token = tokio::select! {
+        result = auth.token(&[DRIVE_SCOPE]) => {
+            result.map_err(|e| format!("OAuth failed: {e}"))?
+        }
+        _ = cancel_rx => {
+            return Err("Auth cancelled".to_string());
+        }
+    };
 
     let access_token = token
         .token()
         .ok_or("No access token returned")?
         .to_string();
+
+    // Bring the app to the foreground
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_focus();
+    }
 
     eprintln!("[google-drive] Auth complete, got access token");
     Ok(access_token)
