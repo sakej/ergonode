@@ -9,9 +9,10 @@ const { listen } = window.__TAURI__.event;
 // ---------- State ----------
 
 const state = {
-  apiUrl: "",
-  apiKey: "",
+  apiUrl: "",           // for display only (connected bar)
   connected: false,
+  loadedFromKeychain: false,
+  platformLabel: "Keychain",
   folders: [],          // flat list from API: [{ name, path }, ...]
   selectedFolder: null, // null = root, string = path
   files: [],            // [{ id, name, path, status, error }]
@@ -102,8 +103,13 @@ const apiUrlInput     = $("#api-url");
 const apiKeyInput     = $("#api-key");
 const toggleKeyBtn    = $("#toggle-key");
 const eyeIcon         = $("#eye-icon");
+const googleClientIdInput    = $("#google-client-id");
+const googleClientSecretInput = $("#google-client-secret");
+const toggleSecretBtn = $("#toggle-secret");
+const eyeIconSecret   = $("#eye-icon-secret");
 const btnConnect      = $("#btn-connect");
 const btnClear        = $("#btn-clear");
+const btnLoadKeychain = $("#btn-load-keychain");
 const connStatus      = $("#connection-status");
 const settingsCard    = $("#settings-card");
 const connectedBar    = $("#connected-bar");
@@ -147,6 +153,13 @@ const revertModalCancel  = $("#revert-modal-cancel");
 const revertModalConfirm = $("#revert-modal-confirm");
 const driveLink          = $("#drive-link");
 const driveLinkSeparator = $("#drive-link-separator");
+const driveSetupLink     = $("#drive-setup-link");
+const driveSetupForm     = $("#drive-setup-form");
+const driveSetupClientId = $("#drive-setup-client-id");
+const driveSetupClientSecret = $("#drive-setup-client-secret");
+const btnDriveSetupSave  = $("#btn-drive-setup-save");
+const googleCredsHelpLink = $("#google-creds-help-link");
+const driveSetupHelpLink  = $("#drive-setup-help-link");
 const driveModal         = $("#drive-modal");
 const driveList          = $("#drive-list");
 const driveBreadcrumb    = $("#drive-breadcrumb");
@@ -159,26 +172,45 @@ const authOverlay       = $("#auth-overlay");
 const authOverlayLink   = $("#auth-overlay-link");
 const authOverlayCancel = $("#auth-overlay-cancel");
 const btnGoogleSignOut  = $("#btn-google-sign-out");
+const keychainModal      = $("#keychain-modal");
+const keychainModalTitle = $("#keychain-modal-title");
+const keychainModalBody  = $("#keychain-modal-body");
+const keychainModalSave  = $("#keychain-modal-save");
+const keychainModalSkip  = $("#keychain-modal-skip");
 
 // ---------- Init ----------
 
 async function init() {
+  // Load non-sensitive config (folder_path only)
   try {
     const settings = await invoke("load_settings");
-    if (settings.api_url) apiUrlInput.value = settings.api_url;
-    if (settings.api_key) apiKeyInput.value = settings.api_key;
     if (settings.folder_path) state.selectedFolder = settings.folder_path;
-  } catch (_) {
-    // No saved settings — that's fine
-  }
-  // Check if Google Drive is available (Client ID embedded at build time)
+  } catch (_) {}
+
+  // Get platform label for keychain buttons
   try {
-    const driveAvailable = await invoke("is_google_drive_available");
-    if (driveAvailable) {
-      driveLink.classList.remove("hidden");
-      driveLinkSeparator.classList.remove("hidden");
+    state.platformLabel = await invoke("get_platform_label");
+  } catch (_) {
+    state.platformLabel = "Keychain";
+  }
+
+  // Run legacy config.json migration (file read only — no keychain access)
+  try {
+    const migrated = await invoke("run_migration");
+    if (migrated) {
+      const dto = await invoke("get_credentials");
+      if (dto.api_url) apiUrlInput.value = dto.api_url;
+      if (dto.api_key) apiKeyInput.value = dto.api_key;
+      if (dto.google_client_id) googleClientIdInput.value = dto.google_client_id;
+      if (dto.google_client_secret) googleClientSecretInput.value = dto.google_client_secret;
+      showStatus(connStatus, "Migrated credentials from previous version. Click Connect to proceed.", "success");
     }
   } catch (_) {}
+
+  // Always show "Load from Keychain" button — no keychain probe on startup.
+  // If user clicks it and nothing is stored, they get a clear error message.
+  btnLoadKeychain.textContent = `Load from ${state.platformLabel}`;
+  btnLoadKeychain.classList.remove("hidden");
 
   bindEvents();
   setupDragDrop();
@@ -194,9 +226,27 @@ function bindEvents() {
     eyeIcon.textContent = isPassword ? "Hide" : "Show";
   });
 
+  // Show/hide Google Client Secret
+  toggleSecretBtn.addEventListener("click", () => {
+    const isPassword = googleClientSecretInput.type === "password";
+    googleClientSecretInput.type = isPassword ? "text" : "password";
+    eyeIconSecret.textContent = isPassword ? "Hide" : "Show";
+  });
+
   btnConnect.addEventListener("click", handleConnect);
   btnClear.addEventListener("click", handleClearSettings);
+  btnLoadKeychain.addEventListener("click", handleLoadKeychain);
   btnDisconnect.addEventListener("click", handleDisconnect);
+
+  // External links — Tauri webview doesn't follow <a target="_blank">
+  const GOOGLE_CREDS_URL = "https://github.com/sakej/ergonode/tree/main/batch-uploader#creating-your-own-client-id";
+  googleCredsHelpLink.addEventListener("click", () => {
+    invoke("open_url", { url: GOOGLE_CREDS_URL });
+  });
+  driveSetupHelpLink.addEventListener("click", (e) => {
+    e.stopPropagation();
+    invoke("open_url", { url: GOOGLE_CREDS_URL });
+  });
 
   // Folder controls
   btnNewFolder.addEventListener("click", () => {
@@ -221,6 +271,38 @@ function bindEvents() {
   driveLink.addEventListener("click", (e) => {
     e.stopPropagation(); // Don't trigger dropZone click
     handleGoogleDrivePicker();
+  });
+
+  // "Set up Google Drive" link in drop zone
+  driveSetupLink.addEventListener("click", (e) => {
+    e.stopPropagation();
+    driveSetupForm.classList.toggle("hidden");
+  });
+
+  // Save Google Drive credentials from drop zone form
+  btnDriveSetupSave.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const clientId = driveSetupClientId.value.trim();
+    const clientSecret = driveSetupClientSecret.value.trim();
+    if (!clientId) return;
+
+    try {
+      await invoke("set_google_client", {
+        googleClientId: clientId,
+        googleClientSecret: clientSecret || null,
+      });
+      // Sync with settings card fields
+      googleClientIdInput.value = clientId;
+      googleClientSecretInput.value = clientSecret;
+      driveSetupForm.classList.add("hidden");
+
+      // Offer to update keychain
+      await showKeychainConsentModal("update");
+      // Refresh drive availability
+      await refreshDriveAvailability();
+    } catch (err) {
+      console.warn("[drive-setup] Save failed:", err);
+    }
   });
 
   // Google sign-out
@@ -266,6 +348,61 @@ function bindEvents() {
   });
 
   bindDriveEvents();
+}
+
+// ---------- Keychain ----------
+
+async function handleLoadKeychain() {
+  try {
+    const dto = await invoke("load_from_keychain");
+    // Clear all credential fields before applying loaded values
+    apiUrlInput.value = "";
+    apiKeyInput.value = "";
+    googleClientIdInput.value = "";
+    googleClientSecretInput.value = "";
+    if (dto.api_url) apiUrlInput.value = dto.api_url;
+    if (dto.api_key) apiKeyInput.value = dto.api_key;
+    if (dto.google_client_id) googleClientIdInput.value = dto.google_client_id;
+    if (dto.google_client_secret) googleClientSecretInput.value = dto.google_client_secret;
+    state.loadedFromKeychain = true;
+    showStatus(connStatus, `Loaded from ${state.platformLabel}. Click Connect to proceed.`, "success");
+  } catch (err) {
+    showStatus(connStatus, `Failed to load from ${state.platformLabel}: ${err}`, "error");
+  }
+}
+
+function showKeychainConsentModal(action) {
+  const verb = action === "update" ? "Update" : "Save to";
+  return new Promise((resolve) => {
+    keychainModalTitle.textContent = `${verb} ${state.platformLabel}?`;
+    keychainModalBody.textContent = `Your credentials will be securely stored in the OS ${state.platformLabel}.`;
+    keychainModal.classList.remove("hidden");
+
+    const cleanup = () => {
+      keychainModal.classList.add("hidden");
+      keychainModalSave.removeEventListener("click", onSave);
+      keychainModalSkip.removeEventListener("click", onSkip);
+    };
+
+    const onSave = async () => {
+      cleanup();
+      try {
+        await invoke("save_to_keychain");
+        state.loadedFromKeychain = true; // don't ask again on reconnect
+      } catch (err) {
+        console.warn("[keychain] Save failed:", err);
+      }
+      resolve(true);
+    };
+
+    const onSkip = () => {
+      cleanup();
+      resolve(false);
+    };
+
+    keychainModalSave.addEventListener("click", onSave, { once: true });
+    keychainModalSkip.addEventListener("click", onSkip, { once: true });
+  });
 }
 
 // ---------- Folder Modal ----------
@@ -361,13 +498,11 @@ async function handleRevert() {
 
     for (let i = 0; i < filePaths.length; i += DELETE_BATCH_SIZE) {
       const batch = filePaths.slice(i, i + DELETE_BATCH_SIZE);
-      uploadCounter.textContent = `Deleting files… ${i}/${filePaths.length}`;
+      uploadCounter.textContent = `Deleting files\u2026 ${i}/${filePaths.length}`;
       uploadCounter.style.color = "var(--amber)";
 
       try {
         const result = await invoke("batch_delete", {
-          apiUrl: state.apiUrl,
-          apiKey: state.apiKey,
           paths: batch,
           deleteType: "file",
         });
@@ -399,7 +534,7 @@ async function handleRevert() {
         summary.errors.push(`Batch error: ${err}`);
       }
     }
-    uploadCounter.textContent = `Deleting files… ${filePaths.length}/${filePaths.length}`;
+    uploadCounter.textContent = `Deleting files\u2026 ${filePaths.length}/${filePaths.length}`;
     uploadCounter.style.color = "var(--amber)";
   }
 
@@ -414,13 +549,11 @@ async function handleRevert() {
 
     for (let i = 0; i < sorted.length; i += DELETE_BATCH_SIZE) {
       const batch = sorted.slice(i, i + DELETE_BATCH_SIZE);
-      uploadCounter.textContent = `Deleting folders… ${i}/${sorted.length}`;
+      uploadCounter.textContent = `Deleting folders\u2026 ${i}/${sorted.length}`;
       uploadCounter.style.color = "var(--amber)";
 
       try {
         const result = await invoke("batch_delete", {
-          apiUrl: state.apiUrl,
-          apiKey: state.apiKey,
           paths: batch,
           deleteType: "folder",
         });
@@ -530,14 +663,23 @@ async function handleConnect() {
   showStatus(connStatus, "Connecting...", "connecting");
 
   try {
-    await invoke("test_connection", { apiUrl, apiKey });
+    // Store all credentials in backend memory
+    const googleClientId = googleClientIdInput.value.trim() || null;
+    const googleClientSecret = googleClientSecretInput.value.trim() || null;
+    await invoke("set_credentials", {
+      apiUrl, apiKey,
+      googleClientId,
+      googleClientSecret,
+    });
+
+    // Test connection (reads from backend state — no params needed)
+    await invoke("test_connection");
 
     state.apiUrl = apiUrl;
-    state.apiKey = apiKey;
     state.connected = true;
 
-    // Save settings
-    await invoke("save_settings", { apiUrl, apiKey, folderPath: state.selectedFolder });
+    // Save folder preference (non-sensitive config only)
+    await invoke("save_settings", { folderPath: state.selectedFolder });
 
     showStatus(connStatus, "Connected successfully!", "success");
 
@@ -548,21 +690,48 @@ async function handleConnect() {
     workspace.classList.remove("hidden");
 
     await loadFolders();
+    await refreshDriveAvailability();
 
-    // Check if user is signed in to Google Drive
-    try {
-      const signedIn = await invoke("google_drive_is_signed_in");
-      if (signedIn) {
-        btnGoogleSignOut.classList.remove("hidden");
-      } else {
-        btnGoogleSignOut.classList.add("hidden");
-      }
-    } catch (_) {}
+    // Offer to save to keychain (unless just loaded from keychain)
+    if (!state.loadedFromKeychain) {
+      await showKeychainConsentModal("save");
+    }
   } catch (err) {
     showStatus(connStatus, "Connection failed: " + err, "error");
     state.connected = false;
   } finally {
     btnConnect.disabled = false;
+  }
+}
+
+async function refreshDriveAvailability() {
+  try {
+    const available = await invoke("is_google_drive_available");
+    if (available) {
+      driveLink.classList.remove("hidden");
+      driveLinkSeparator.classList.remove("hidden");
+      driveSetupLink.classList.add("hidden");
+      driveSetupForm.classList.add("hidden");
+      // Check if signed in to Google
+      try {
+        const signedIn = await invoke("google_drive_is_signed_in");
+        if (signedIn) {
+          btnGoogleSignOut.classList.remove("hidden");
+        } else {
+          btnGoogleSignOut.classList.add("hidden");
+        }
+      } catch (_) {}
+    } else {
+      driveLink.classList.add("hidden");
+      driveLinkSeparator.classList.add("hidden");
+      // Show "set up Google Drive" link only when connected
+      if (state.connected) {
+        driveSetupLink.classList.remove("hidden");
+      }
+    }
+  } catch (_) {
+    driveLink.classList.add("hidden");
+    driveLinkSeparator.classList.add("hidden");
   }
 }
 
@@ -573,23 +742,32 @@ async function handleClearSettings() {
   resetToDisconnected();
   apiUrlInput.value = "";
   apiKeyInput.value = "";
+  googleClientIdInput.value = "";
+  googleClientSecretInput.value = "";
+  state.loadedFromKeychain = false;
 }
 
 function handleDisconnect() {
   resetToDisconnected();
+  // Clear form fields — user must re-enter or load from keychain
+  apiUrlInput.value = "";
+  apiKeyInput.value = "";
+  googleClientIdInput.value = "";
+  googleClientSecretInput.value = "";
 }
 
 function resetToDisconnected() {
   state.uploadLedger = null;
   state.pendingCreatedFolders = [];
   state.apiUrl = "";
-  state.apiKey = "";
   state.connected = false;
   state.selectedFolder = null;
   settingsCard.classList.remove("hidden");
   connectedBar.classList.add("hidden");
   workspace.classList.add("hidden");
   btnGoogleSignOut.classList.add("hidden");
+  driveSetupLink.classList.add("hidden");
+  driveSetupForm.classList.add("hidden");
   hideStatus(connStatus);
 }
 
@@ -599,10 +777,7 @@ async function loadFolders() {
   folderTree.innerHTML = '<div class="folder-loading">Loading folders...</div>';
 
   try {
-    const folders = await invoke("fetch_folders", {
-      apiUrl: state.apiUrl,
-      apiKey: state.apiKey,
-    });
+    const folders = await invoke("fetch_folders");
     state.folders = folders;
     renderFolderTree(folders);
   } catch (err) {
@@ -708,10 +883,8 @@ function createFolderItem(node, isRoot) {
     folderTree.querySelectorAll(".folder-item").forEach((el) => el.classList.remove("selected"));
     row.classList.add("selected");
 
-    // Persist selection
+    // Persist selection (folder_path only)
     invoke("save_settings", {
-      apiUrl: state.apiUrl,
-      apiKey: state.apiKey,
       folderPath: state.selectedFolder,
     }).catch(() => {});
   });
@@ -746,8 +919,6 @@ async function handleCreateFolder() {
 
   try {
     await invoke("create_folder", {
-      apiUrl: state.apiUrl,
-      apiKey: state.apiKey,
       name: name,
       parentPath: state.selectedFolder,
     });
@@ -924,11 +1095,6 @@ async function addFoldersByPath(dirPaths) {
   const includeRoot = includeRootEl.checked;
   const flatUpload = flatUploadEl.checked;
 
-  // Determine root folder name(s) for "include root" option
-  const rootNames = dirPaths.map(p =>
-    p.replace(/\\/g, "/").split("/").filter(Boolean).pop()
-  ).filter(Boolean);
-
   // Apply options to relative_dirs
   if (flatUpload && includeRoot) {
     // Flat inside root: all files go into root folder, no substructure
@@ -983,8 +1149,6 @@ async function addFoldersByPath(dirPaths) {
     console.log("[folder-drop] Creating folders:", subfolders);
     try {
       await invoke("create_folders_batch", {
-        apiUrl: state.apiUrl,
-        apiKey: state.apiKey,
         basePath: state.selectedFolder || null,
         relativePaths: subfolders,
       });
@@ -1138,7 +1302,7 @@ function driveRenderBreadcrumb() {
     if (i > 0) {
       const sep = document.createElement("span");
       sep.className = "drive-crumb-sep";
-      sep.textContent = "›";
+      sep.textContent = "\u203A";
       driveBreadcrumb.appendChild(sep);
     }
     const el = document.createElement("span");
@@ -1263,12 +1427,7 @@ function driveCloseBrowser() {
 }
 
 async function driveImportSelected() {
-  // Gather selected files from all items we've seen
-  const selectedFiles = [];
-  // We need to collect from current view — user may have selected across folders
-  // For simplicity, selected IDs are tracked globally. We need the item data.
-  // Re-fetch isn't needed: we only import what's visible + previously selected.
-  // But we need item data for selected IDs. Store items by ID.
+  // Gather selected files from current view
   const allItems = driveState.items.filter(i => driveState.selected.has(i.id));
 
   // Close the Drive modal
@@ -1277,8 +1436,6 @@ async function driveImportSelected() {
   const accessToken = driveState.accessToken;
 
   if (allItems.length === 0) {
-    // Selections were from other folders — list them
-    // For now, just queue what's selected in current view
     driveCloseBrowser();
     return;
   }
@@ -1562,8 +1719,6 @@ async function uploadSingleFile(file) {
 
   try {
     const result = await invoke("upload_file", {
-      apiUrl: state.apiUrl,
-      apiKey: state.apiKey,
       filePath: file.path,
       fileName: file.name,
       folderPath: file.targetFolder !== null ? file.targetFolder : state.selectedFolder,

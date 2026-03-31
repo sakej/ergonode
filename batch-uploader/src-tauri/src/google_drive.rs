@@ -1,5 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use google_drive3::hyper_rustls;
 use google_drive3::hyper_util;
@@ -8,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::oneshot;
 
-use crate::token_storage::KeychainTokenStorage;
+use crate::credential_store::{CredentialStore, CredentialTokenStorage};
 
 /// Custom delegate that opens the browser for OAuth and emits the URL to the frontend.
 struct BrowserDelegate {
@@ -36,10 +37,6 @@ impl yup_oauth2::authenticator_delegate::InstalledFlowDelegate for BrowserDelega
     }
 }
 
-/// Compile-time Client ID and Secret (set via env vars at build time)
-const CLIENT_ID: Option<&str> = option_env!("GOOGLE_CLIENT_ID");
-const CLIENT_SECRET: Option<&str> = option_env!("GOOGLE_CLIENT_SECRET");
-
 const DRIVE_SCOPE: &str = "https://www.googleapis.com/auth/drive.readonly";
 
 /// A single item (file or folder) in a Drive listing
@@ -50,11 +47,6 @@ pub struct DriveItem {
     pub size: u64,
     pub mime_type: String,
     pub is_folder: bool,
-}
-
-/// Check if the Google Drive feature is available (Client ID is embedded)
-pub fn is_available() -> bool {
-    CLIENT_ID.map(|s| !s.is_empty()).unwrap_or(false)
 }
 
 /// Supported file extensions (same as the app's file picker filter)
@@ -87,14 +79,18 @@ fn is_google_native_format(mime_type: &str) -> bool {
 
 /// Run OAuth flow — uses cached token if available, otherwise opens browser.
 /// Supports cancellation via the provided oneshot receiver.
-pub async fn authenticate(app: AppHandle, cancel_rx: oneshot::Receiver<()>) -> Result<String, String> {
-    let client_id = CLIENT_ID.ok_or("Google Drive is not configured")?;
-    if client_id.is_empty() {
-        return Err("Google Drive Client ID is empty".to_string());
-    }
+/// Reads client ID/secret from CredentialStore (with compile-time fallback).
+pub async fn authenticate(
+    app: AppHandle,
+    cancel_rx: oneshot::Receiver<()>,
+    store: Arc<CredentialStore>,
+) -> Result<String, String> {
+    let client_id = store.get_google_client_id().await
+        .ok_or("Google Drive is not configured")?;
+    let client_secret = store.get_google_client_secret().await;
 
-    // Build first authenticator with persistent storage
-    let auth = build_auth(client_id, app.clone()).await?;
+    // Build first authenticator with in-memory token storage
+    let auth = build_auth(&client_id, &client_secret, app.clone(), store.clone()).await?;
 
     // Race: auth token vs cancel signal.
     // Dropping auth.token() on cancel is safe — yup_oauth2's internal HTTP
@@ -110,11 +106,10 @@ pub async fn authenticate(app: AppHandle, cancel_rx: oneshot::Receiver<()>) -> R
     let token = match token_result {
         Ok(t) => t,
         Err(e) => {
-            let checker = KeychainTokenStorage::new();
-            if checker.has_token(&[DRIVE_SCOPE]) {
+            if store.has_google_token(&[DRIVE_SCOPE]).await {
                 eprintln!("[google-drive] Token refresh failed ({e}), clearing cache and retrying");
-                checker.delete_token(&[DRIVE_SCOPE]);
-                let auth2 = build_auth(client_id, app.clone()).await?;
+                store.delete_google_token(&[DRIVE_SCOPE]).await;
+                let auth2 = build_auth(&client_id, &client_secret, app.clone(), store.clone()).await?;
                 auth2.token(&[DRIVE_SCOPE]).await
                     .map_err(|e| format!("OAuth failed: {e}"))?
             } else {
@@ -137,8 +132,13 @@ pub async fn authenticate(app: AppHandle, cancel_rx: oneshot::Receiver<()>) -> R
     Ok(access_token)
 }
 
-/// Build a fresh yup_oauth2 authenticator with keychain-backed storage.
-async fn build_auth(client_id: &str, app: AppHandle) -> Result<
+/// Build a fresh yup_oauth2 authenticator with in-memory token storage.
+async fn build_auth(
+    client_id: &str,
+    client_secret: &str,
+    app: AppHandle,
+    store: Arc<CredentialStore>,
+) -> Result<
     yup_oauth2::authenticator::Authenticator<
         hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
     >,
@@ -146,7 +146,7 @@ async fn build_auth(client_id: &str, app: AppHandle) -> Result<
 > {
     let secret = yup_oauth2::ApplicationSecret {
         client_id: client_id.to_string(),
-        client_secret: CLIENT_SECRET.unwrap_or("").to_string(),
+        client_secret: client_secret.to_string(),
         token_uri: "https://oauth2.googleapis.com/token".to_string(),
         auth_uri: "https://accounts.google.com/o/oauth2/v2/auth?prompt=consent".to_string(),
         redirect_uris: Vec::new(),
@@ -172,7 +172,7 @@ async fn build_auth(client_id: &str, app: AppHandle) -> Result<
         yup_oauth2::InstalledFlowReturnMethod::HTTPRedirect,
         yup_oauth2::client::CustomHyperClientBuilder::from(client),
     )
-    .with_storage(Box::new(KeychainTokenStorage::new()))
+    .with_storage(Box::new(CredentialTokenStorage(store)))
     .flow_delegate(Box::new(BrowserDelegate { app }))
     .build()
     .await
@@ -372,18 +372,16 @@ pub async fn download_file(
     Ok(temp_path.to_string_lossy().to_string())
 }
 
-// ---------- Sign out ----------
+// ---------- Sign in / out ----------
 
-/// Check if a Google OAuth token exists in storage.
-pub fn is_signed_in() -> bool {
-    let storage = KeychainTokenStorage::new();
-    storage.has_token(&[DRIVE_SCOPE])
+/// Check if a Google OAuth token exists in memory.
+pub async fn is_signed_in(store: &CredentialStore) -> bool {
+    store.has_google_token(&[DRIVE_SCOPE]).await
 }
 
 /// Sign out of Google Drive — delete cached token and revoke it.
-pub async fn sign_out() -> Result<(), String> {
-    let storage = KeychainTokenStorage::new();
-    let token_info = storage.delete_token(&[DRIVE_SCOPE]);
+pub async fn sign_out(store: &CredentialStore) -> Result<(), String> {
+    let token_info = store.delete_google_token(&[DRIVE_SCOPE]).await;
 
     // Best-effort revoke — try access token, fall back to refresh token
     if let Some(info) = token_info {

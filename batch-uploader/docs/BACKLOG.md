@@ -18,35 +18,66 @@ Once approved:
 
 **Reference:** [Google OAuth verification docs](https://support.google.com/cloud/answer/9110914)
 
-### Runtime Client ID + Secret Input
+### Done: Runtime Client ID + Secret Input
 
-**Status:** Up next
+**Status:** Done (unified-credentials branch)
 
-Allow users to enter their own Google Client ID and Client Secret in the app UI. Store securely in OS keychain (same mechanism as OAuth token persistence). Remove the `.env` / build-time `option_env!()` dependency entirely.
+Implemented as part of the unified credential management system. Users can enter Google Client ID and Secret in the Connection Settings card or via the "Set up Google Drive" inline form in the drop zone. Stored in the unified keychain blob. Build-time `option_env!()` kept as fallback.
 
-**Scope:**
-- Add Client ID + Client Secret fields to the app UI
-- Store in OS keychain via `keyring` crate (infrastructure added by token persistence task)
-- Runtime credentials are the only source — no more build-time env vars
-- If no credentials configured, Drive link stays hidden
-- Consider supporting import from Google Cloud Console JSON export
+### Done: Ergonode API Key Migration to Keychain
 
-### Ergonode API Key Migration to Keychain
+**Status:** Done (unified-credentials branch)
 
-**Status:** Planned
+API key now stored in the unified keychain blob alongside all other credentials. Legacy config.json migration runs automatically on first launch. Config.json now only holds non-sensitive data (folder_path).
 
-Move the Ergonode API key from plaintext `config.json` to the OS keychain for consistency with Google credential storage. The config file would keep only non-secret data (API URL, folder path).
+### Done: Clean up compiler warnings
 
-**Scope:**
-- Migrate existing plaintext API key to keychain on first run
-- Remove `api_key` from `config.json` after migration
-- Fallback to config file if keychain unavailable (same pattern as token storage)
+**Status:** Done (v1.4.0 + unified-credentials branch)
 
-### Clean up compiler warnings
+Dead code removed in v1.4.0. One remaining warning for `set_ergonode_credentials` — intentionally kept as public API.
+
+## Performance
+
+### Shared reqwest::Client for connection pooling
 
 **Status:** Planned
 
-The Rust build produces 4 warnings:
+Every Ergonode API command (`test_connection`, `fetch_folders`, `upload_file`, etc.) creates a new `reqwest::Client` via `ErgonodeClient::new()`. This prevents HTTP connection reuse and pool sharing.
 
-1. **`ImportResult` struct (google_drive.rs:336)** — dead code, leftover from the original "dump all files" approach. Was replaced by the in-app Drive browser which returns files individually via `list_folder` + `list_folder_recursive`. Safe to delete.
-2. **3 dead code warnings in ergonode.rs** — pre-existing unused fields/functions. Need to audit and remove.
+**Fix:** Create a single `reqwest::Client` in Tauri managed state or in `ErgonodeClient` as a shared instance. Pass it to all API commands. Improves upload throughput for batch operations.
+
+**Scope:** Modify `ergonode.rs` to accept a shared client, or store one in Tauri state alongside `CredentialStore`.
+
+## UX
+
+### "Clear Settings" should offer to clear keychain
+
+**Status:** Planned
+
+Currently "Clear Settings" only clears the config.json and form fields. The keychain entry persists, so "Load from Keychain" still appears on next launch. Users who expect "clear" to mean "clear everything" may be confused.
+
+**Fix:** Either add a separate "Delete saved credentials" button, or show a confirmation dialog asking whether to also clear the keychain entry.
+
+### Refactor app.js into smaller modules
+
+**Status:** Planned
+
+`app.js` is ~1750 lines in a single file. Should be split into focused modules (e.g., `state.js`, `connection.js`, `upload.js`, `drive.js`, `modals.js`).
+
+**Scope:** Split during next major frontend change. Use ES modules or a simple concatenation build step.
+
+## Known Limitations
+
+### Shutdown hook uses try_read() on tokio RwLock
+
+**Status:** Known limitation
+
+The `ExitRequested` shutdown hook calls `save_to_keychain_sync()` which uses `tokio::sync::RwLock::try_read()`. If a write lock is held at the exact moment of shutdown (e.g., token refresh in progress), the read fails and unsaved credentials are lost.
+
+**Mitigation:** The window is extremely narrow (token refresh writes are sub-millisecond). A full fix would require switching to `std::sync::RwLock` or restructuring the shutdown hook to run in an async context.
+
+### Done: No keychain access on startup
+
+**Status:** Fixed
+
+Previously `keychain_has_credentials()` was called on init, triggering macOS keychain prompts on unsigned dev builds. Fixed by removing the startup probe — "Load from Keychain" button is always visible, and keychain is only accessed when the user explicitly clicks it. Legacy keychain migration (old google-token entries, probe cleanup) deferred to `load_from_keychain`.
