@@ -1114,3 +1114,16 @@ input:focus {
 .auth-overlay-hint a:hover {
   text-decoration: underline;
 }
+
+/* ---------- Connected bar actions ---------- */
+
+.connected-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.google-sign-out {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
