@@ -7,8 +7,33 @@ use google_drive3::hyper_util;
 use google_drive3::yup_oauth2;
 use serde::Serialize;
 
-/// Compile-time Client ID (set via GOOGLE_CLIENT_ID env var at build time)
+/// Custom delegate that opens the browser for OAuth.
+/// yup_oauth2 only prints the URL to stdout by default.
+struct BrowserDelegate;
+
+impl yup_oauth2::authenticator_delegate::InstalledFlowDelegate for BrowserDelegate {
+    fn present_user_url<'a>(
+        &'a self,
+        url: &'a str,
+        _need_code: bool,
+    ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>> {
+        Box::pin(async move {
+            eprintln!("[google-drive] Opening browser for auth: {url}");
+            if let Err(e) = open::that(url) {
+                eprintln!("[google-drive] Failed to open browser: {e}");
+                eprintln!("[google-drive] Please open this URL manually: {url}");
+            } else {
+                eprintln!("[google-drive] Browser opened successfully");
+            }
+            // For HTTPRedirect flow, the return value is not used
+            Ok(String::new())
+        })
+    }
+}
+
+/// Compile-time Client ID and Secret (set via env vars at build time)
 const CLIENT_ID: Option<&str> = option_env!("GOOGLE_CLIENT_ID");
+const CLIENT_SECRET: Option<&str> = option_env!("GOOGLE_CLIENT_SECRET");
 
 /// Type alias for the connector used throughout this module.
 type HttpsConnector = hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>;
@@ -65,7 +90,9 @@ fn is_google_native_format(mime_type: &str) -> bool {
 /// Run the full OAuth + file listing flow.
 /// Returns a list of files ready for download.
 pub async fn pick_and_list_files() -> Result<PickerResult, String> {
+    eprintln!("[google-drive] pick_and_list_files called");
     let client_id = CLIENT_ID.ok_or("Google Drive is not configured")?;
+    eprintln!("[google-drive] Client ID present: {}", !client_id.is_empty());
     if client_id.is_empty() {
         return Err("Google Drive Client ID is empty".to_string());
     }
@@ -73,9 +100,9 @@ pub async fn pick_and_list_files() -> Result<PickerResult, String> {
     // Build ApplicationSecret for yup-oauth2
     let secret = yup_oauth2::ApplicationSecret {
         client_id: client_id.to_string(),
-        client_secret: String::new(),
+        client_secret: CLIENT_SECRET.unwrap_or("").to_string(),
         token_uri: "https://oauth2.googleapis.com/token".to_string(),
-        auth_uri: "https://accounts.google.com/o/oauth2/v2/auth?trigger_onepick=true&allow_multiple=true&prompt=consent".to_string(),
+        auth_uri: "https://accounts.google.com/o/oauth2/v2/auth?prompt=consent&trigger_onepick=true&allow_multiple=true".to_string(),
         redirect_uris: Vec::new(),
         project_id: None,
         client_email: None,
@@ -100,9 +127,12 @@ pub async fn pick_and_list_files() -> Result<PickerResult, String> {
         yup_oauth2::InstalledFlowReturnMethod::HTTPRedirect,
         yup_oauth2::client::CustomHyperClientBuilder::from(auth_client),
     )
+    .flow_delegate(Box::new(BrowserDelegate))
     .build()
     .await
     .map_err(|e| format!("OAuth setup failed: {e}"))?;
+
+    eprintln!("[google-drive] Auth built, building DriveHub...");
 
     // Build the Drive API hub (separate client instance)
     let hub_connector = hyper_rustls::HttpsConnectorBuilder::new()
@@ -118,54 +148,62 @@ pub async fn pick_and_list_files() -> Result<PickerResult, String> {
 
     let hub = DriveHub::new(hub_client, auth);
 
-    // Get the access token for later downloads
-    let scopes = &["https://www.googleapis.com/auth/drive.file"];
-    let access_token = hub
-        .auth
-        .get_token(scopes)
-        .await
-        .map_err(|e| format!("Failed to get access token: {e}"))?
-        .ok_or_else(|| "No access token returned".to_string())?;
+    eprintln!("[google-drive] DriveHub built, listing files...");
 
     // List all files the user granted access to (paginated)
     let mut all_files: Vec<DriveFileInfo> = Vec::new();
     let mut page_token: Option<String> = None;
+    let mut total_raw = 0usize;
+    let mut skipped_native = 0usize;
+    let mut skipped_folder = 0usize;
+    let mut skipped_ext = 0usize;
 
     loop {
         let mut req = hub
             .files()
             .list()
+            .q("mimeType != 'application/vnd.google-apps.folder' and 'me' in owners and trashed = false")
             .page_size(1000)
-            .param("fields", "nextPageToken,files(id,name,size,mimeType,parents)");
+            .param("fields", "nextPageToken,files(id,name,size,mimeType)")
+            .add_scope("https://www.googleapis.com/auth/drive.readonly");
 
         if let Some(ref token) = page_token {
             req = req.page_token(token);
         }
 
-        let (_, file_list) = req
-            .doit()
-            .await
+        eprintln!("[google-drive] Calling files().list().doit()...");
+        let doit_result = req.doit().await;
+        if let Err(ref e) = doit_result {
+            eprintln!("[google-drive] doit() error: {e:?}");
+        }
+        let (_, file_list) = doit_result
             .map_err(|e| format!("Failed to list Drive files: {e}"))?;
 
         if let Some(files) = file_list.files {
+            eprintln!("[google-drive] Page returned {} files", files.len());
             for file in files {
+                total_raw += 1;
                 let name = file.name.unwrap_or_default();
                 let mime_type = file.mime_type.clone().unwrap_or_default();
                 let id = file.id.unwrap_or_default();
 
+                eprintln!("[google-drive]   file: {name} | mime: {mime_type} | id: {id}");
+
                 if is_google_native_format(&mime_type) {
+                    skipped_native += 1;
+                    eprintln!("[google-drive]     -> skipped (Google native format)");
                     continue;
                 }
 
-                // Folders are skipped while using drive.file scope — it only grants
-                // access to individually picked files, not folder children.
-                // TODO: switch to drive.readonly scope after Google app verification
-                // to enable folder recursion via list_folder_recursive().
                 if mime_type == "application/vnd.google-apps.folder" {
+                    // Skip folders for now — listing all Drive files is already slow.
+                    // TODO: add Drive folder browser UI so user picks a specific folder to import
                     continue;
                 }
 
                 if !is_supported_extension(&name) {
+                    skipped_ext += 1;
+                    eprintln!("[google-drive]     -> skipped (unsupported extension)");
                     continue;
                 }
 
@@ -187,13 +225,27 @@ pub async fn pick_and_list_files() -> Result<PickerResult, String> {
         }
     }
 
+    eprintln!(
+        "[google-drive] Done. Total raw: {total_raw}, accepted: {}, skipped: native={skipped_native} folder={skipped_folder} ext={skipped_ext}",
+        all_files.len()
+    );
+
+    // Get the access token for later downloads (auth already happened via files().list())
+    let scopes = &["https://www.googleapis.com/auth/drive.readonly"];
+    let access_token = hub
+        .auth
+        .get_token(scopes)
+        .await
+        .map_err(|e| format!("Failed to get access token: {e}"))?
+        .ok_or_else(|| "No access token returned".to_string())?;
+
+    eprintln!("[google-drive] Got access token for downloads");
+
     Ok(PickerResult { files: all_files, access_token })
 }
 
 /// Recursively list all files in a Drive folder, building relative_dir paths.
 /// Uses Box::pin to allow async recursion.
-/// NOTE: Currently unused — requires drive.readonly scope (pending Google app verification).
-#[allow(dead_code)]
 fn list_folder_recursive<'a>(
     hub: &'a DriveHub<HttpsConnector>,
     folder_id: &'a str,
@@ -210,7 +262,8 @@ fn list_folder_recursive<'a>(
                 .list()
                 .q(&query)
                 .page_size(1000)
-                .param("fields", "nextPageToken,files(id,name,size,mimeType)");
+                .param("fields", "nextPageToken,files(id,name,size,mimeType)")
+                .add_scope("https://www.googleapis.com/auth/drive.readonly");
 
             if let Some(ref token) = page_token {
                 req = req.page_token(token);
