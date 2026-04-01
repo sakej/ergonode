@@ -275,7 +275,7 @@ async fn google_drive_list_folder_recursive(
 ) -> Result<Vec<google_drive::DriveFileInfo>, String> {
     let access_token = token_state.0.lock().unwrap().clone()
         .ok_or("Not authenticated with Google Drive")?;
-    google_drive::list_folder_recursive_flat(&access_token, &folder_id, &folder_name).await
+    google_drive::list_folder_recursive_flat(&access_token, &folder_id, &folder_name, 0).await
 }
 
 #[tauri::command]
@@ -321,6 +321,8 @@ pub fn run() {
 
     let cred_store = Arc::new(CredentialStore::new());
 
+    google_drive::cleanup_stale_temp_files();
+
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(cred_store.clone())
@@ -348,6 +350,7 @@ pub fn run() {
 
     app.run(move |_app_handle, event| {
         if let tauri::RunEvent::ExitRequested { .. } = event {
+            google_drive::cleanup_stale_temp_files();
             if cred_store.is_dirty() {
                 eprintln!("[credentials] Persisting dirty credentials on shutdown");
                 if let Err(e) = cred_store.save_to_keychain_sync() {

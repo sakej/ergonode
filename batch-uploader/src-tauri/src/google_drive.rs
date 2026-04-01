@@ -39,6 +39,9 @@ impl yup_oauth2::authenticator_delegate::InstalledFlowDelegate for BrowserDelega
 
 const DRIVE_SCOPE: &str = "https://www.googleapis.com/auth/drive.readonly";
 
+/// Safety limit for recursive folder traversal to prevent stack overflow.
+const MAX_DRIVE_DEPTH: u32 = 32;
+
 /// A single item (file or folder) in a Drive listing
 #[derive(Serialize, Clone, Debug)]
 pub struct DriveItem {
@@ -286,7 +289,11 @@ pub async fn list_folder_recursive_flat(
     access_token: &str,
     folder_id: &str,
     folder_path: &str,
+    depth: u32,
 ) -> Result<Vec<DriveFileInfo>, String> {
+    if depth > MAX_DRIVE_DEPTH {
+        return Err(format!("Folder nesting too deep (>{MAX_DRIVE_DEPTH} levels)"));
+    }
     let items = list_folder(access_token, folder_id).await?;
     let mut results: Vec<DriveFileInfo> = Vec::new();
 
@@ -297,7 +304,7 @@ pub async fn list_folder_recursive_flat(
             } else {
                 format!("{}/{}", folder_path, item.name)
             };
-            let sub_files = Box::pin(list_folder_recursive_flat(access_token, &item.id, &sub_path)).await?;
+            let sub_files = Box::pin(list_folder_recursive_flat(access_token, &item.id, &sub_path, depth + 1)).await?;
             results.extend(sub_files);
         } else {
             results.push(DriveFileInfo {
@@ -400,6 +407,23 @@ pub async fn sign_out(store: &CredentialStore) -> Result<(), String> {
 
     eprintln!("[google-drive] Signed out");
     Ok(())
+}
+
+/// Remove all ergonode_drive_* temp files left from previous sessions.
+pub fn cleanup_stale_temp_files() {
+    let temp_dir = std::env::temp_dir();
+    if let Ok(entries) = std::fs::read_dir(&temp_dir) {
+        for entry in entries.flatten() {
+            if entry
+                .file_name()
+                .to_str()
+                .map(|n| n.starts_with("ergonode_drive_"))
+                .unwrap_or(false)
+            {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
 }
 
 /// Delete a temp file (silently ignore if not found).
