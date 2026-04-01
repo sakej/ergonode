@@ -332,6 +332,15 @@ impl CredentialStore {
                     use std::os::unix::fs::PermissionsExt;
                     let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
                 }
+                #[cfg(windows)]
+                {
+                    if let Ok(user) = std::env::var("USERNAME") {
+                        let _ = std::process::Command::new("icacls")
+                            .arg(&path)
+                            .args(["/inheritance:r", "/grant:r", &format!("{user}:(F)")])
+                            .output();
+                    }
+                }
                 eprintln!("[credentials] Saved to file fallback");
                 Ok(())
             }
