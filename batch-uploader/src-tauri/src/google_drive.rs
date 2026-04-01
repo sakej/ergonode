@@ -24,7 +24,7 @@ impl yup_oauth2::authenticator_delegate::InstalledFlowDelegate for BrowserDelega
     ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>> {
         let app = self.app.clone();
         Box::pin(async move {
-            eprintln!("[google-drive] Opening browser for auth: {url}");
+            eprintln!("[google-drive] Opening browser for auth (URL redacted)");
 
             // Emit URL to frontend for the fallback link
             let _ = app.emit("google-drive-auth-url", url);
