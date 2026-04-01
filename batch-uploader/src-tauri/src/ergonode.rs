@@ -2,9 +2,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Escape a string for embedding inside a GraphQL string literal.
-/// Handles both backslashes and double quotes.
+/// Handles backslashes, double quotes, newlines, carriage returns, and tabs.
 fn escape_gql(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
 }
 
 // ---------- Public types ----------
