@@ -99,6 +99,9 @@ fn get_platform_label() -> &'static str {
 /// Open a URL in the user's default browser.
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
+    if !url.starts_with("https://") {
+        return Err("Only https:// URLs are allowed".to_string());
+    }
     open::that(&url).map_err(|e| format!("Failed to open URL: {e}"))
 }
 
