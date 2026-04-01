@@ -325,12 +325,6 @@ pub struct DriveFileInfo {
     pub relative_dir: String,
 }
 
-/// Auth result
-#[derive(Serialize)]
-pub struct AuthResult {
-    pub access_token: String,
-}
-
 // ---------- Download ----------
 
 /// Download a Drive file to OS temp directory.

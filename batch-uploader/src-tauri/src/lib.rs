@@ -14,6 +14,9 @@ use ergonode::{ErgonodeClient, FolderInfo, UploadResult, BatchDeleteResult};
 /// Holds the cancel sender for an in-progress Google Drive auth flow.
 struct AuthCancelState(Mutex<Option<oneshot::Sender<()>>>);
 
+/// Holds the current Google Drive access token (Rust-side only, never sent to frontend).
+struct DriveTokenState(Mutex<Option<String>>);
+
 // ---------- Non-sensitive config (folder_path) ----------
 
 #[tauri::command]
@@ -223,11 +226,11 @@ async fn google_drive_auth(
     app: tauri::AppHandle,
     cancel_state: tauri::State<'_, AuthCancelState>,
     cred_store: tauri::State<'_, Arc<CredentialStore>>,
-) -> Result<google_drive::AuthResult, String> {
+    token_state: tauri::State<'_, DriveTokenState>,
+) -> Result<(), String> {
     let (tx, rx) = oneshot::channel();
     {
         let mut guard = cancel_state.0.lock().unwrap();
-        // Cancel any in-flight auth before starting a new one
         if let Some(old_tx) = guard.take() {
             let _ = old_tx.send(());
         }
@@ -237,11 +240,11 @@ async fn google_drive_auth(
     let store = Arc::clone(&cred_store);
     let result = google_drive::authenticate(app, rx, store).await;
 
-    // Clear sender after auth completes (success or fail)
     *cancel_state.0.lock().unwrap() = None;
 
     let access_token = result?;
-    Ok(google_drive::AuthResult { access_token })
+    *token_state.0.lock().unwrap() = Some(access_token);
+    Ok(())
 }
 
 #[tauri::command]
@@ -253,27 +256,33 @@ fn google_drive_auth_cancel(cancel_state: tauri::State<'_, AuthCancelState>) {
 
 #[tauri::command]
 async fn google_drive_list_folder(
-    access_token: String,
+    token_state: tauri::State<'_, DriveTokenState>,
     folder_id: String,
 ) -> Result<Vec<google_drive::DriveItem>, String> {
+    let access_token = token_state.0.lock().unwrap().clone()
+        .ok_or("Not authenticated with Google Drive")?;
     google_drive::list_folder(&access_token, &folder_id).await
 }
 
 #[tauri::command]
 async fn google_drive_list_folder_recursive(
-    access_token: String,
+    token_state: tauri::State<'_, DriveTokenState>,
     folder_id: String,
     folder_name: String,
 ) -> Result<Vec<google_drive::DriveFileInfo>, String> {
+    let access_token = token_state.0.lock().unwrap().clone()
+        .ok_or("Not authenticated with Google Drive")?;
     google_drive::list_folder_recursive_flat(&access_token, &folder_id, &folder_name).await
 }
 
 #[tauri::command]
 async fn google_drive_download(
-    access_token: String,
+    token_state: tauri::State<'_, DriveTokenState>,
     file_id: String,
     file_name: String,
 ) -> Result<String, String> {
+    let access_token = token_state.0.lock().unwrap().clone()
+        .ok_or("Not authenticated with Google Drive")?;
     google_drive::download_file(&file_id, &file_name, &access_token).await
 }
 
@@ -292,7 +301,9 @@ async fn google_drive_is_signed_in(
 #[tauri::command]
 async fn google_drive_sign_out(
     store: tauri::State<'_, Arc<CredentialStore>>,
+    token_state: tauri::State<'_, DriveTokenState>,
 ) -> Result<(), String> {
+    *token_state.0.lock().unwrap() = None;
     google_drive::sign_out(&store).await
 }
 
@@ -311,6 +322,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(cred_store.clone())
         .manage(AuthCancelState(Mutex::new(None)))
+        .manage(DriveTokenState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             // Config
             load_settings, save_settings, clear_settings,

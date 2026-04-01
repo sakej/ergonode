@@ -1263,7 +1263,6 @@ async function addFoldersByPath(dirPaths) {
 
 // Drive browser state (separate from main state)
 const driveState = {
-  accessToken: null,
   path: [],           // [{id, name}, ...] — breadcrumb trail
   items: [],          // current folder's items from API
   selected: new Set(), // selected item IDs (files only)
@@ -1274,8 +1273,7 @@ async function handleGoogleDrivePicker() {
   try {
     const signedIn = await invoke("google_drive_is_signed_in");
     if (signedIn) {
-      const result = await invoke("google_drive_auth");
-      driveState.accessToken = result.access_token;
+      await invoke("google_drive_auth");
       btnGoogleSignOut.classList.remove("hidden");
 
       if (state.loadedFromKeychain) {
@@ -1314,9 +1312,8 @@ async function handleGoogleDrivePicker() {
   authOverlayCancel.addEventListener("click", onCancel, { once: true });
 
   try {
-    const result = await invoke("google_drive_auth");
+    await invoke("google_drive_auth");
     if (cancelled) return;
-    driveState.accessToken = result.access_token;
     btnGoogleSignOut.classList.remove("hidden");
 
     // Securely persist the new token so the user doesn't have to auth again
@@ -1355,7 +1352,6 @@ async function driveLoadFolder(folderId) {
 
   try {
     const items = await invoke("google_drive_list_folder", {
-      accessToken: driveState.accessToken,
       folderId,
     });
     driveState.items = items;
@@ -1489,7 +1485,6 @@ function formatSize(bytes) {
 
 function driveCloseBrowser() {
   driveModal.classList.add("hidden");
-  driveState.accessToken = null;
   driveState.items = [];
   driveState.selected = new Set();
   driveState.path = [];
@@ -1501,8 +1496,6 @@ async function driveImportSelected() {
 
   // Close the Drive modal
   driveModal.classList.add("hidden");
-
-  const accessToken = driveState.accessToken;
 
   if (allItems.length === 0) {
     driveCloseBrowser();
@@ -1525,7 +1518,6 @@ async function driveImportSelected() {
       targetFolder,
       relativeDir: "",
       driveFileId: item.id,
-      driveAccessToken: accessToken,
       isTempFile: false,
       tempPath: null,
     };
@@ -1766,7 +1758,6 @@ async function uploadSingleFile(file) {
     updateFileRow(file);
     try {
       const tempPath = await invoke("google_drive_download", {
-        accessToken: file.driveAccessToken,
         fileId: file.driveFileId,
         fileName: file.name,
       });
