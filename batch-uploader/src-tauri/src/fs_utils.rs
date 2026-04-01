@@ -1,6 +1,8 @@
 use serde::Serialize;
 use std::path::Path;
 
+const MAX_SCAN_DEPTH: u32 = 32;
+
 #[derive(Serialize, Clone)]
 pub struct ScannedFile {
     pub name: String,
@@ -16,17 +18,26 @@ pub struct ScannedFile {
 /// `root` is the originally dropped directory (used to compute relative paths).
 pub fn scan_dir(dir: &Path, root: &Path) -> Result<Vec<ScannedFile>, String> {
     let mut results = Vec::new();
-    scan_recursive(dir, root, &mut results)?;
+    scan_recursive(dir, root, &mut results, 0)?;
     Ok(results)
 }
 
-fn scan_recursive(dir: &Path, root: &Path, results: &mut Vec<ScannedFile>) -> Result<(), String> {
+fn scan_recursive(dir: &Path, root: &Path, results: &mut Vec<ScannedFile>, depth: u32) -> Result<(), String> {
+    if depth > MAX_SCAN_DEPTH {
+        return Err(format!("Directory nesting too deep (>{MAX_SCAN_DEPTH} levels): {}", dir.display()));
+    }
+
     let entries = std::fs::read_dir(dir)
         .map_err(|e| format!("Cannot read directory {}: {}", dir.display(), e))?;
 
     for entry in entries {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
+
+        // Skip symlinks to prevent symlink loops
+        if path.symlink_metadata().map(|m| m.is_symlink()).unwrap_or(false) {
+            continue;
+        }
 
         // Skip hidden files/dirs (starting with .)
         if path
@@ -39,7 +50,7 @@ fn scan_recursive(dir: &Path, root: &Path, results: &mut Vec<ScannedFile>) -> Re
         }
 
         if path.is_dir() {
-            scan_recursive(&path, root, results)?;
+            scan_recursive(&path, root, results, depth + 1)?;
         } else if path.is_file() {
             let name = path
                 .file_name()
