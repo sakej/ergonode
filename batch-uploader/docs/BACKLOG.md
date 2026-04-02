@@ -32,6 +32,17 @@ The `ExitRequested` shutdown hook calls `save_to_keychain_sync()` which uses `to
 
 ## Completed
 
+### v1.6.0
+
+- **OAuth token in Rust state** — access token no longer passes through frontend JS
+- **Windows credential file ACL** — owner-only permissions via `icacls`
+- **GraphQL escape hardening** — `\n`, `\r`, `\t` now escaped in `escape_gql`
+- **URL scheme allowlist** — `open_url` restricted to `https://` only
+- **Directory scan depth limit** — max 32 levels, symlinks detected and skipped
+- **Drive recursive depth limit** — max 32 levels for `list_folder_recursive_flat`
+- **Temp file cleanup** — stale `ergonode_drive_*` files cleaned on startup and exit
+- **Auth URL redaction** — OAuth URL no longer logged to stderr in full
+
 ### v1.5.0
 
 - **Unified credential management** — all credentials in a single keychain blob with legacy migration

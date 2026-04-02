@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.6.0
+
+### Security Hardening
+- OAuth access token moved to Rust-side state — no longer exposed to frontend JS (C-2)
+- Windows credential file restricted to owner-only via `icacls` ACL, matching Unix `0o600` behavior (H-3)
+- GraphQL string escaping now handles `\n`, `\r`, `\t` characters (H-1)
+- `open_url` command restricted to `https://` scheme only (H-2)
+- Directory scan limited to 32 levels deep with symlink detection and skip (M-1)
+- Google Drive recursive listing limited to 32 levels deep (M-2)
+- Stale Google Drive temp files cleaned up on app startup and exit (M-3)
+- OAuth authorization URL redacted from stderr logs (L-auth)
+
+### Bug Fixes
+- Fixed Load from Keychain populating form fields with masked values instead of real credentials
+
 ## v1.5.0
 
 ### Unified Credential Management
