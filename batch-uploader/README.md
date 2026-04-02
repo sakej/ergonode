@@ -2,7 +2,9 @@
 
 A lightweight desktop app for bulk-uploading files to your Ergonode media library.
 
-Built with [Tauri](https://tauri.app/) (Rust backend + vanilla HTML/CSS/JS frontend). No frameworks, no bloat — just a ~5MB native app.
+> **Disclaimer:** This is not an official Ergonode product. It's a personal tool I built and decided to share.
+
+Built with [Tauri](https://tauri.app/) (Rust backend + vanilla HTML/CSS/JS frontend). No frameworks, no bloat — just a ~6MB native app.
 
 ### Highlights
 
