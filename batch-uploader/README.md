@@ -4,6 +4,16 @@ A lightweight desktop app for bulk-uploading files to your Ergonode media librar
 
 Built with [Tauri](https://tauri.app/) (Rust backend + vanilla HTML/CSS/JS frontend). No frameworks, no bloat — just a ~5MB native app.
 
+### Highlights
+
+- **Bulk upload** — drag & drop files or entire folders; handles rate limits and retries automatically
+- **Google Drive import** — browse Drive folders in-app, pick files, upload straight to Ergonode
+- **Folder structure recreation** — drop a folder and recreate its directory tree in Ergonode
+- **Revert upload** — undo the last batch with one click (files and/or folders)
+- **53 file types** — images, videos, documents, 3D models, CAD, Adobe, spreadsheets, archives
+- **Secure credentials** — API keys and OAuth tokens stored in OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service)
+- **Cross-platform** — Windows, macOS, Linux
+
 ## Features
 
 - **Drag & drop** files or folders — browse with native file picker
