@@ -30,18 +30,10 @@ pub struct CredentialBlob {
     pub google_tokens: HashMap<String, TokenInfo>,
 }
 
-/// Mask a secret string, showing only the last 4 characters.
-fn mask_secret(s: &str) -> String {
-    if s.len() <= 4 {
-        "••••".to_string()
-    } else {
-        format!("••••{}", &s[s.len() - 4..])
-    }
-}
-
 /// DTO sent to frontend — exposes all fields except google_tokens
-/// (replaced by has_google_token boolean). api_key and google_client_secret
-/// are masked so only the last 4 characters are visible.
+/// (replaced by has_google_token boolean).
+/// Secrets are sent unmasked because all DTO consumers populate form fields.
+/// The frontend uses password-type inputs with show/hide toggles for visual masking.
 #[derive(Serialize)]
 pub struct CredentialBlobDto {
     pub api_url: Option<String>,
@@ -55,9 +47,9 @@ impl From<&CredentialBlob> for CredentialBlobDto {
     fn from(blob: &CredentialBlob) -> Self {
         Self {
             api_url: blob.api_url.clone(),
-            api_key: blob.api_key.as_deref().map(mask_secret),
+            api_key: blob.api_key.clone(),
             google_client_id: blob.google_client_id.clone(),
-            google_client_secret: blob.google_client_secret.as_deref().map(mask_secret),
+            google_client_secret: blob.google_client_secret.clone(),
             has_google_token: !blob.google_tokens.is_empty(),
         }
     }
