@@ -107,7 +107,6 @@ Google Drive import is optional. Without a Client ID, the app works normally —
    - Choose **Internal** user type (if available — requires Google Workspace; otherwise choose **External**)
    - Fill in the required fields (app name, support email)
    - Add scope: `https://www.googleapis.com/auth/drive.file`
-   - Add yourself as a test user (required while app is in "Testing" status)
 5. Create **OAuth credentials**:
    - Go to **APIs & Services** → **Credentials**
    - Click **Create Credentials** → **OAuth client ID**
@@ -118,7 +117,7 @@ Google Drive import is optional. Without a Client ID, the app works normally —
 ### Using your Client ID
 
 **Option A — Runtime entry (no rebuild needed):**
-After connecting to Ergonode, click **Set up Google Drive** in the drop zone and paste your Client ID and Client Secret. These are saved to the OS keychain alongside your other credentials.
+Enter your Client ID and Client Secret in the **Connection Settings** card before connecting, or click **Set up Google Drive** in the drop zone after connecting. Either way, credentials are saved to the OS keychain alongside your other credentials.
 
 **Option B — Compile-time embed:**
 Create a `.env` file in the `batch-uploader/` directory:
@@ -130,9 +129,7 @@ GOOGLE_CLIENT_SECRET=your-client-secret-here
 
 Then build or run the app — both values are embedded at compile time. Runtime credentials take priority over compile-time values.
 
-You can also enter the Client ID and Client Secret in the **Connection Settings** card under "Google Drive" before connecting.
-
-> **Testing mode:** While your Google Cloud project is in "Testing" status, only users listed as test users can authorize. This is fine for personal use. Publishing to production requires [Google verification](https://support.google.com/cloud/answer/9110914) (4–6 weeks).
+> **Testing mode:** While your Google Cloud project is in "Testing" status, only users listed as test users can authorize. This is fine for personal use.
 
 ## Building from Source
 

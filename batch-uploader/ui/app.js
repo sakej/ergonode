@@ -271,10 +271,14 @@ function bindEvents() {
   });
   btnRefreshFolders.addEventListener("click", () => loadFolders());
 
-  // Drop zone click -> file picker (ignore clicks on interactive children)
-  dropZone.addEventListener("click", (e) => {
-    if (e.target.closest(".drive-setup-form, .drive-link, .drive-setup-link")) return;
+  // Browse files / folders links in drop zone
+  $("#browse-files").addEventListener("click", (e) => {
+    e.stopPropagation();
     handleFilePicker();
+  });
+  $("#browse-folders").addEventListener("click", (e) => {
+    e.stopPropagation();
+    handleFolderPicker();
   });
 
   // Google Drive link
@@ -1020,6 +1024,18 @@ async function handleFilePicker() {
 
     if (selected && selected.length > 0) {
       await addFilesByPath(selected);
+    }
+  } catch (_) {
+    // User cancelled
+  }
+}
+
+async function handleFolderPicker() {
+  try {
+    const selected = await open({ directory: true });
+
+    if (selected) {
+      await addFoldersByPath([selected]);
     }
   } catch (_) {
     // User cancelled
