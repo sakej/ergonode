@@ -1217,7 +1217,9 @@ async function addFoldersByPath(dirPaths) {
 
   // Create folders in Ergonode pre-flight
   if (subfolders.length > 0) {
-    showInlineStatus(`Creating ${subfolders.length} folder(s) in Ergonode...`);
+    scanSpinnerText.textContent = "Scanning folder structure...";
+    scanSpinner.classList.remove("hidden");
+    uploadControls.classList.add("hidden");
     console.log("[folder-drop] Creating folders:", subfolders);
     try {
       await invoke("create_folders_batch", {
@@ -1226,10 +1228,13 @@ async function addFoldersByPath(dirPaths) {
       });
       console.log("[folder-drop] Folders created successfully");
     } catch (err) {
+      scanSpinner.classList.add("hidden");
+      uploadControls.classList.remove("hidden");
       showInlineError("Failed to create folders: " + err);
       return;
     }
-    hideInlineStatus();
+    scanSpinner.classList.add("hidden");
+    uploadControls.classList.remove("hidden");
 
     // Remember ALL folders (including intermediates) for revert ledger
     state.pendingCreatedFolders = subfolders.map(rel => {

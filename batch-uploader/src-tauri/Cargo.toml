@@ -1,6 +1,6 @@
 [package]
 name = "ergonode-uploader"
-version = "1.6.0"
+version = "1.6.1"
 description = "Ergonode Batch Image Uploader"
 authors = [""]
 edition = "2021"

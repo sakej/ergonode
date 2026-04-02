@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.6.1
+
+### Improvements
+- Browse button now offers separate "files" and "folders" options — folder picker opens native directory dialog
+- Folder scanning shows spinner with "Scanning folder structure..." instead of misleading "Creating in Ergonode" message
+
+### Docs
+- Updated README: Google Drive setup instructions clarified, backlog removed from repo
+
 ## v1.6.0
 
 ### Security Hardening
