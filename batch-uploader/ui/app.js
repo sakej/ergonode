@@ -185,7 +185,7 @@ async function init() {
   try {
     const settings = await invoke("load_settings");
     if (settings.folder_path) state.selectedFolder = settings.folder_path;
-  } catch (_) {}
+  } catch (e) { console.warn("[init] load_settings failed:", e); }
 
   // Get platform label for keychain buttons
   try {
@@ -767,7 +767,7 @@ async function refreshDriveAvailability() {
         } else {
           btnGoogleSignOut.classList.add("hidden");
         }
-      } catch (_) {}
+      } catch (e) { console.warn("[drive] sign-in check failed:", e); }
     } else {
       driveLink.classList.add("hidden");
       driveLinkSeparator.classList.add("hidden");
@@ -785,7 +785,7 @@ async function refreshDriveAvailability() {
 async function handleClearSettings() {
   try {
     await invoke("clear_settings");
-  } catch (_) {}
+  } catch (e) { console.warn("[settings] clear_settings failed:", e); }
   resetToDisconnected();
   apiUrlInput.value = "";
   apiKeyInput.value = "";
@@ -946,7 +946,7 @@ function createFolderItem(node, isRoot) {
     // Persist selection (folder_path only)
     invoke("save_settings", {
       folderPath: state.selectedFolder,
-    }).catch(() => {});
+    }).catch((e) => console.warn("[settings] save_settings failed:", e));
   });
 
   // Double-click to toggle children
