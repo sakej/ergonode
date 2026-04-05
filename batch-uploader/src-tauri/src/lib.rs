@@ -4,18 +4,21 @@ mod ergonode;
 mod fs_utils;
 mod google_drive;
 
-use std::sync::{Arc, Mutex};
-use tokio::sync::oneshot;
+use std::sync::Arc;
+use tokio::sync::{oneshot, Mutex};
 
 use config::AppConfig;
 use credential_store::{CredentialBlobDto, CredentialStore};
-use ergonode::{ErgonodeClient, FolderInfo, UploadResult, BatchDeleteResult};
+use ergonode::{BatchDeleteResult, ErgonodeClient, FolderInfo, UploadResult};
 
 /// Holds the cancel sender for an in-progress Google Drive auth flow.
 struct AuthCancelState(Mutex<Option<oneshot::Sender<()>>>);
 
 /// Holds the current Google Drive access token (Rust-side only, never sent to frontend).
 struct DriveTokenState(Mutex<Option<String>>);
+
+/// Shared reqwest HTTP client for connection pooling and TLS session reuse.
+struct HttpClient(reqwest::Client);
 
 // ---------- Non-sensitive config (folder_path) ----------
 
@@ -45,9 +48,7 @@ async fn load_from_keychain(
 }
 
 #[tauri::command]
-async fn save_to_keychain(
-    store: tauri::State<'_, Arc<CredentialStore>>,
-) -> Result<(), String> {
+async fn save_to_keychain(store: tauri::State<'_, Arc<CredentialStore>>) -> Result<(), String> {
     store.save_to_keychain().await
 }
 
@@ -68,7 +69,9 @@ async fn set_credentials(
     google_client_id: Option<String>,
     google_client_secret: Option<String>,
 ) -> Result<(), String> {
-    store.set_all(api_url, api_key, google_client_id, google_client_secret).await;
+    store
+        .set_all(api_url, api_key, google_client_id, google_client_secret)
+        .await;
     Ok(())
 }
 
@@ -85,7 +88,9 @@ async fn set_google_client(
     google_client_id: Option<String>,
     google_client_secret: Option<String>,
 ) -> Result<(), String> {
-    store.set_google_client(google_client_id, google_client_secret).await;
+    store
+        .set_google_client(google_client_id, google_client_secret)
+        .await;
     Ok(())
 }
 
@@ -99,7 +104,8 @@ fn get_platform_label() -> &'static str {
 /// Open a URL in the user's default browser.
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
-    if !url.starts_with("https://") {
+    let parsed = url::Url::parse(&url).map_err(|e| format!("Invalid URL: {e}"))?;
+    if parsed.scheme() != "https" {
         return Err("Only https:// URLs are allowed".to_string());
     }
     open::that(&url).map_err(|e| format!("Failed to open URL: {e}"))
@@ -108,9 +114,7 @@ fn open_url(url: String) -> Result<(), String> {
 /// Migrate credentials from legacy config.json (file read only — no keychain access).
 /// Returns true if legacy credentials were found and loaded into memory.
 #[tauri::command]
-async fn run_migration(
-    store: tauri::State<'_, Arc<CredentialStore>>,
-) -> Result<bool, String> {
+async fn run_migration(store: tauri::State<'_, Arc<CredentialStore>>) -> Result<bool, String> {
     let config_path = config::config_file_path();
     let blob = match config_path.and_then(|p| credential_store::migrate_legacy_config(&p)) {
         Some(b) => b,
@@ -129,45 +133,51 @@ async fn run_migration(
 #[tauri::command]
 async fn test_connection(
     store: tauri::State<'_, Arc<CredentialStore>>,
+    http: tauri::State<'_, HttpClient>,
 ) -> Result<(), String> {
     let (api_url, api_key) = store.get_ergonode_credentials().await;
     if api_url.is_empty() || api_key.is_empty() {
         return Err("No credentials configured".to_string());
     }
-    let client = ErgonodeClient::new(&api_url, &api_key);
+    let client = ErgonodeClient::new(&api_url, &api_key, http.0.clone())?;
     client.test_connection().await
 }
 
 #[tauri::command]
 async fn fetch_folders(
     store: tauri::State<'_, Arc<CredentialStore>>,
+    http: tauri::State<'_, HttpClient>,
 ) -> Result<Vec<FolderInfo>, String> {
     let (api_url, api_key) = store.get_ergonode_credentials().await;
-    let client = ErgonodeClient::new(&api_url, &api_key);
+    let client = ErgonodeClient::new(&api_url, &api_key, http.0.clone())?;
     client.fetch_folders().await
 }
 
 #[tauri::command]
 async fn create_folder(
     store: tauri::State<'_, Arc<CredentialStore>>,
+    http: tauri::State<'_, HttpClient>,
     name: String,
     parent_path: Option<String>,
 ) -> Result<(), String> {
     let (api_url, api_key) = store.get_ergonode_credentials().await;
-    let client = ErgonodeClient::new(&api_url, &api_key);
+    let client = ErgonodeClient::new(&api_url, &api_key, http.0.clone())?;
     client.create_folder(&name, parent_path.as_deref()).await
 }
 
 #[tauri::command]
 async fn upload_file(
     store: tauri::State<'_, Arc<CredentialStore>>,
+    http: tauri::State<'_, HttpClient>,
     file_path: String,
     file_name: String,
     folder_path: Option<String>,
 ) -> Result<UploadResult, String> {
     let (api_url, api_key) = store.get_ergonode_credentials().await;
-    let client = ErgonodeClient::new(&api_url, &api_key);
-    Ok(client.upload_file(&file_path, &file_name, folder_path.as_deref()).await)
+    let client = ErgonodeClient::new(&api_url, &api_key, http.0.clone())?;
+    Ok(client
+        .upload_file(&file_path, &file_name, folder_path.as_deref())
+        .await)
 }
 
 #[tauri::command]
@@ -194,11 +204,12 @@ fn is_directory(path: String) -> bool {
 #[tauri::command]
 async fn create_folders_batch(
     store: tauri::State<'_, Arc<CredentialStore>>,
+    http: tauri::State<'_, HttpClient>,
     base_path: Option<String>,
     relative_paths: Vec<String>,
 ) -> Result<(), String> {
     let (api_url, api_key) = store.get_ergonode_credentials().await;
-    let client = ErgonodeClient::new(&api_url, &api_key);
+    let client = ErgonodeClient::new(&api_url, &api_key, http.0.clone())?;
     client
         .create_folders_batch(base_path.as_deref(), &relative_paths)
         .await
@@ -207,11 +218,12 @@ async fn create_folders_batch(
 #[tauri::command]
 async fn batch_delete(
     store: tauri::State<'_, Arc<CredentialStore>>,
+    http: tauri::State<'_, HttpClient>,
     paths: Vec<String>,
     delete_type: String,
 ) -> Result<BatchDeleteResult, String> {
     let (api_url, api_key) = store.get_ergonode_credentials().await;
-    let client = ErgonodeClient::new(&api_url, &api_key);
+    let client = ErgonodeClient::new(&api_url, &api_key, http.0.clone())?;
     client.batch_delete(&paths, &delete_type).await
 }
 
@@ -233,7 +245,7 @@ async fn google_drive_auth(
 ) -> Result<(), String> {
     let (tx, rx) = oneshot::channel();
     {
-        let mut guard = cancel_state.0.lock().unwrap();
+        let mut guard = cancel_state.0.lock().await;
         if let Some(old_tx) = guard.take() {
             let _ = old_tx.send(());
         }
@@ -243,50 +255,69 @@ async fn google_drive_auth(
     let store = Arc::clone(&cred_store);
     let result = google_drive::authenticate(app, rx, store).await;
 
-    *cancel_state.0.lock().unwrap() = None;
+    *cancel_state.0.lock().await = None;
 
     let access_token = result?;
-    *token_state.0.lock().unwrap() = Some(access_token);
+    *token_state.0.lock().await = Some(access_token);
     Ok(())
 }
 
 #[tauri::command]
-fn google_drive_auth_cancel(cancel_state: tauri::State<'_, AuthCancelState>) {
-    if let Some(tx) = cancel_state.0.lock().unwrap().take() {
+async fn google_drive_auth_cancel(
+    cancel_state: tauri::State<'_, AuthCancelState>,
+) -> Result<(), String> {
+    if let Some(tx) = cancel_state.0.lock().await.take() {
         let _ = tx.send(());
     }
+    Ok(())
 }
 
 #[tauri::command]
 async fn google_drive_list_folder(
     token_state: tauri::State<'_, DriveTokenState>,
+    http: tauri::State<'_, HttpClient>,
     folder_id: String,
 ) -> Result<Vec<google_drive::DriveItem>, String> {
-    let access_token = token_state.0.lock().unwrap().clone()
+    let access_token = token_state
+        .0
+        .lock()
+        .await
+        .clone()
         .ok_or("Not authenticated with Google Drive")?;
-    google_drive::list_folder(&access_token, &folder_id).await
+    google_drive::list_folder(&http.0, &access_token, &folder_id).await
 }
 
 #[tauri::command]
 async fn google_drive_list_folder_recursive(
     token_state: tauri::State<'_, DriveTokenState>,
+    http: tauri::State<'_, HttpClient>,
     folder_id: String,
     folder_name: String,
 ) -> Result<Vec<google_drive::DriveFileInfo>, String> {
-    let access_token = token_state.0.lock().unwrap().clone()
+    let access_token = token_state
+        .0
+        .lock()
+        .await
+        .clone()
         .ok_or("Not authenticated with Google Drive")?;
-    google_drive::list_folder_recursive_flat(&access_token, &folder_id, &folder_name, 0).await
+    google_drive::list_folder_recursive_flat(&http.0, &access_token, &folder_id, &folder_name, 0)
+        .await
 }
 
 #[tauri::command]
 async fn google_drive_download(
     token_state: tauri::State<'_, DriveTokenState>,
+    http: tauri::State<'_, HttpClient>,
     file_id: String,
     file_name: String,
 ) -> Result<String, String> {
-    let access_token = token_state.0.lock().unwrap().clone()
+    let access_token = token_state
+        .0
+        .lock()
+        .await
+        .clone()
         .ok_or("Not authenticated with Google Drive")?;
-    google_drive::download_file(&file_id, &file_name, &access_token).await
+    google_drive::download_file(&http.0, &file_id, &file_name, &access_token).await
 }
 
 #[tauri::command]
@@ -305,9 +336,10 @@ async fn google_drive_is_signed_in(
 async fn google_drive_sign_out(
     store: tauri::State<'_, Arc<CredentialStore>>,
     token_state: tauri::State<'_, DriveTokenState>,
+    http: tauri::State<'_, HttpClient>,
 ) -> Result<(), String> {
-    *token_state.0.lock().unwrap() = None;
-    google_drive::sign_out(&store).await
+    *token_state.0.lock().await = None;
+    google_drive::sign_out(&store, &http.0).await
 }
 
 // ---------- App entry point ----------
@@ -321,29 +353,56 @@ pub fn run() {
 
     let cred_store = Arc::new(CredentialStore::new());
 
+    let http_client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .expect("failed to build HTTP client");
+
     google_drive::cleanup_stale_temp_files();
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(cred_store.clone())
+        .manage(HttpClient(http_client))
         .manage(AuthCancelState(Mutex::new(None)))
         .manage(DriveTokenState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             // Config
-            load_settings, save_settings, clear_settings,
+            load_settings,
+            save_settings,
+            clear_settings,
             // Credentials
-            load_from_keychain, save_to_keychain,
-            delete_keychain_entry, set_credentials, set_google_client, get_credentials, get_platform_label,
+            load_from_keychain,
+            save_to_keychain,
+            delete_keychain_entry,
+            set_credentials,
+            set_google_client,
+            get_credentials,
+            get_platform_label,
             // Util
-            open_url, run_migration,
+            open_url,
+            run_migration,
             // Ergonode API
-            test_connection, fetch_folders, create_folder, upload_file, get_file_size,
-            scan_directory, is_directory, create_folders_batch, batch_delete,
+            test_connection,
+            fetch_folders,
+            create_folder,
+            upload_file,
+            get_file_size,
+            scan_directory,
+            is_directory,
+            create_folders_batch,
+            batch_delete,
             // Google Drive
-            is_google_drive_available, google_drive_auth, google_drive_auth_cancel,
-            google_drive_list_folder, google_drive_list_folder_recursive,
-            google_drive_download, google_drive_delete_temp,
-            google_drive_is_signed_in, google_drive_sign_out
+            is_google_drive_available,
+            google_drive_auth,
+            google_drive_auth_cancel,
+            google_drive_list_folder,
+            google_drive_list_folder_recursive,
+            google_drive_download,
+            google_drive_delete_temp,
+            google_drive_is_signed_in,
+            google_drive_sign_out
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

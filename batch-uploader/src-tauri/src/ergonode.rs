@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::net::IpAddr;
 
 /// Escape a string for embedding inside a GraphQL string literal.
 /// Handles backslashes, double quotes, newlines, carriage returns, and tabs.
@@ -91,13 +92,60 @@ pub struct ErgonodeClient {
     api_key: String,
 }
 
+/// Validate that a URL is HTTPS and does not point to a private/link-local/loopback address.
+/// Prevents credential leakage to cloud metadata endpoints or local services.
+fn validate_api_url(api_url: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(api_url).map_err(|e| format!("Invalid API URL: {e}"))?;
+
+    if parsed.scheme() != "https" {
+        return Err("API URL must use HTTPS".to_string());
+    }
+
+    // If the host is an IP address, reject private/link-local/loopback ranges
+    if let Some(host) = parsed.host_str() {
+        if let Ok(ip) = host.parse::<IpAddr>() {
+            let reject = match ip {
+                IpAddr::V4(v4) => {
+                    v4.is_loopback()          // 127.0.0.0/8
+                    || v4.is_private()         // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+                    || v4.is_link_local()      // 169.254.0.0/16 (cloud metadata)
+                    || v4.is_unspecified()     // 0.0.0.0
+                    || v4.is_broadcast() // 255.255.255.255
+                }
+                IpAddr::V6(v6) => {
+                    v6.is_loopback()           // ::1
+                    || v6.is_unspecified()     // ::
+                    // IPv4-mapped (::ffff:127.0.0.1, ::ffff:169.254.169.254, etc.)
+                    || v6.to_ipv4_mapped().map(|v4| {
+                        v4.is_loopback() || v4.is_private() || v4.is_link_local()
+                        || v4.is_unspecified() || v4.is_broadcast()
+                    }).unwrap_or(false)
+                    // IPv6 unique local (fc00::/7)
+                    || (v6.segments()[0] & 0xfe00) == 0xfc00
+                    // IPv6 link-local (fe80::/10)
+                    || (v6.segments()[0] & 0xffc0) == 0xfe80
+                }
+            };
+            if reject {
+                return Err(
+                    "API URL must not point to a private, loopback, or link-local address"
+                        .to_string(),
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
 impl ErgonodeClient {
-    pub fn new(api_url: &str, api_key: &str) -> Self {
-        Self {
-            client: reqwest::Client::new(),
+    pub fn new(api_url: &str, api_key: &str, client: reqwest::Client) -> Result<Self, String> {
+        validate_api_url(api_url)?;
+        Ok(Self {
+            client,
             api_url: api_url.trim_end_matches('/').to_string(),
             api_key: api_key.to_string(),
-        }
+        })
     }
 
     fn endpoint(&self) -> String {
@@ -127,7 +175,10 @@ impl ErgonodeClient {
         }
 
         // Check for GraphQL-level errors
-        let body: serde_json::Value = resp.json().await.map_err(|e| format!("Bad response: {e}"))?;
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("Bad response: {e}"))?;
         if let Some(errors) = body.get("errors") {
             if let Some(arr) = errors.as_array() {
                 if !arr.is_empty() {
@@ -150,9 +201,12 @@ impl ErgonodeClient {
 
         loop {
             let query = match &after {
-                Some(cursor) => format!(
-                    r#"{{"query":"{{ multimediaFolderList(first:300, after:\"{cursor}\") {{ edges {{ node {{ name path }} cursor }} pageInfo {{ hasNextPage }} }} }}"}}"#
-                ),
+                Some(cursor) => {
+                    let escaped_cursor = escape_gql(cursor);
+                    format!(
+                        r#"{{"query":"{{ multimediaFolderList(first:300, after:\"{escaped_cursor}\") {{ edges {{ node {{ name path }} cursor }} pageInfo {{ hasNextPage }} }} }}"}}"#
+                    )
+                },
                 None => r#"{"query":"{ multimediaFolderList(first:300) { edges { node { name path } cursor } pageInfo { hasNextPage } } }"}"#.to_string(),
             };
 
@@ -174,8 +228,10 @@ impl ErgonodeClient {
                 return Err(format!("Server returned status {status}"));
             }
 
-            let body: GqlResponse<FolderListData> =
-                resp.json().await.map_err(|e| format!("Bad response: {e}"))?;
+            let body: GqlResponse<FolderListData> = resp
+                .json()
+                .await
+                .map_err(|e| format!("Bad response: {e}"))?;
 
             if let Some(errors) = &body.errors {
                 if let Some(first) = errors.first() {
@@ -241,7 +297,10 @@ impl ErgonodeClient {
             return Err(format!("Server returned status {status}"));
         }
 
-        let body: serde_json::Value = resp.json().await.map_err(|e| format!("Bad response: {e}"))?;
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("Bad response: {e}"))?;
         if let Some(errors) = body.get("errors") {
             if let Some(arr) = errors.as_array() {
                 if !arr.is_empty() {
@@ -414,7 +473,9 @@ impl ErgonodeClient {
         file_name: &str,
         folder_path: Option<&str>,
     ) -> UploadResult {
-        let result = self.upload_file_inner(file_path, file_name, folder_path).await;
+        let result = self
+            .upload_file_inner(file_path, file_name, folder_path)
+            .await;
         match result {
             Ok(upload) => upload,
             Err(e) => UploadResult {
@@ -426,12 +487,27 @@ impl ErgonodeClient {
         }
     }
 
+    /// Maximum file size for uploads (100 MB). Enforced on the backend to match the frontend limit.
+    const MAX_UPLOAD_SIZE: u64 = 100 * 1024 * 1024;
+
     async fn upload_file_inner(
         &self,
         file_path: &str,
         file_name: &str,
         folder_path: Option<&str>,
     ) -> Result<UploadResult, String> {
+        // Validate file size before reading into memory
+        let metadata = tokio::fs::metadata(file_path)
+            .await
+            .map_err(|e| format!("Failed to read file metadata: {e}"))?;
+        if metadata.len() > Self::MAX_UPLOAD_SIZE {
+            return Err(format!(
+                "File too large ({:.1} MB). Maximum is {} MB.",
+                metadata.len() as f64 / (1024.0 * 1024.0),
+                Self::MAX_UPLOAD_SIZE / (1024 * 1024)
+            ));
+        }
+
         let file_bytes = tokio::fs::read(file_path)
             .await
             .map_err(|e| format!("Failed to read file: {e}"))?;
@@ -492,8 +568,10 @@ impl ErgonodeClient {
             });
         }
 
-        let body: serde_json::Value =
-            resp.json().await.map_err(|e| format!("Bad response: {e}"))?;
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("Bad response: {e}"))?;
 
         // Pass the full raw error JSON so the frontend can parse it
         if let Some(errors_val) = body.get("errors") {

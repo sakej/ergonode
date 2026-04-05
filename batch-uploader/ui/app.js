@@ -413,7 +413,7 @@ function showKeychainConsentModal(action) {
         await invoke("save_to_keychain");
         state.loadedFromKeychain = true; // don't ask again on reconnect
       } catch (err) {
-        console.warn("[keychain] Save failed:", err);
+        showStatus(connStatus, `Failed to save to ${state.platformLabel}: ${err}`, "error");
       }
       resolve(true);
     };
@@ -1298,7 +1298,9 @@ async function handleGoogleDrivePicker() {
       btnGoogleSignOut.classList.remove("hidden");
 
       if (state.loadedFromKeychain) {
-        invoke("save_to_keychain").catch(() => {});
+        invoke("save_to_keychain").catch((err) => {
+          showStatus(connStatus, `Failed to save to ${state.platformLabel}: ${err}`, "error");
+        });
       }
 
       driveState.path = [{ id: "root", name: "My Drive" }];
@@ -1339,7 +1341,9 @@ async function handleGoogleDrivePicker() {
 
     // Securely persist the new token so the user doesn't have to auth again
     if (state.loadedFromKeychain) {
-      await invoke("save_to_keychain").catch(() => {});
+      await invoke("save_to_keychain").catch((err) => {
+          showStatus(connStatus, `Failed to save to ${state.platformLabel}: ${err}`, "error");
+        });
     } else {
       const saved = await showKeychainConsentModal("update");
       if (saved) state.loadedFromKeychain = true;

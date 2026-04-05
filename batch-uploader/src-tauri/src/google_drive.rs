@@ -42,6 +42,12 @@ const DRIVE_SCOPE: &str = "https://www.googleapis.com/auth/drive.readonly";
 /// Safety limit for recursive folder traversal to prevent stack overflow.
 const MAX_DRIVE_DEPTH: u32 = 32;
 
+/// Maximum total files returned from a recursive folder listing to prevent DoS.
+const MAX_RECURSIVE_FILES: usize = 10_000;
+
+/// Maximum total API calls allowed during a recursive folder listing.
+const MAX_RECURSIVE_API_CALLS: usize = 500;
+
 /// A single item (file or folder) in a Drive listing
 #[derive(Serialize, Clone, Debug)]
 pub struct DriveItem {
@@ -54,16 +60,11 @@ pub struct DriveItem {
 
 /// Supported file extensions (same as the app's file picker filter)
 const SUPPORTED_EXTENSIONS: &[&str] = &[
-    "3ds", "dwf", "dwg", "dxf", "fbx", "glb", "obj", "skp", "stp", "igs", "plt", "hpgl",
-    "ai", "eps", "svg", "cdr",
-    "bmp", "gif", "jpeg", "jpg", "png", "tif", "tiff", "webp", "avif", "heic", "hdr",
-    "mkv", "mov", "mp4", "webm", "wmv", "hevc",
-    "doc", "docx", "odt", "pdf", "txt",
-    "csv", "ods", "xls", "xlsx",
-    "ppt", "pptx", "key",
-    "psd", "indd", "indt",
-    "ggpkg", "zip",
-    "max", "usdz", "vrm",
+    "3ds", "dwf", "dwg", "dxf", "fbx", "glb", "obj", "skp", "stp", "igs", "plt", "hpgl", "ai",
+    "eps", "svg", "cdr", "bmp", "gif", "jpeg", "jpg", "png", "tif", "tiff", "webp", "avif", "heic",
+    "hdr", "mkv", "mov", "mp4", "webm", "wmv", "hevc", "doc", "docx", "odt", "pdf", "txt", "csv",
+    "ods", "xls", "xlsx", "ppt", "pptx", "key", "psd", "indd", "indt", "ggpkg", "zip", "max",
+    "usdz", "vrm",
 ];
 
 fn is_supported_extension(name: &str) -> bool {
@@ -88,7 +89,9 @@ pub async fn authenticate(
     cancel_rx: oneshot::Receiver<()>,
     store: Arc<CredentialStore>,
 ) -> Result<String, String> {
-    let client_id = store.get_google_client_id().await
+    let client_id = store
+        .get_google_client_id()
+        .await
         .ok_or("Google Drive is not configured")?;
     let client_secret = store.get_google_client_secret().await;
 
@@ -112,8 +115,11 @@ pub async fn authenticate(
             if store.has_google_token(&[DRIVE_SCOPE]).await {
                 eprintln!("[google-drive] Token refresh failed ({e}), clearing cache and retrying");
                 store.delete_google_token(&[DRIVE_SCOPE]).await;
-                let auth2 = build_auth(&client_id, &client_secret, app.clone(), store.clone()).await?;
-                auth2.token(&[DRIVE_SCOPE]).await
+                let auth2 =
+                    build_auth(&client_id, &client_secret, app.clone(), store.clone()).await?;
+                auth2
+                    .token(&[DRIVE_SCOPE])
+                    .await
                     .map_err(|e| format!("OAuth failed: {e}"))?
             } else {
                 return Err(format!("OAuth failed: {e}"));
@@ -121,10 +127,7 @@ pub async fn authenticate(
         }
     };
 
-    let access_token = token
-        .token()
-        .ok_or("No access token returned")?
-        .to_string();
+    let access_token = token.token().ok_or("No access token returned")?.to_string();
 
     // Bring the app to the foreground
     if let Some(window) = app.get_webview_window("main") {
@@ -165,10 +168,8 @@ async fn build_auth(
         .https_or_http()
         .enable_http2()
         .build();
-    let client = hyper_util::client::legacy::Client::builder(
-        hyper_util::rt::TokioExecutor::new(),
-    )
-    .build(connector);
+    let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+        .build(connector);
 
     yup_oauth2::InstalledFlowAuthenticator::with_client(
         secret,
@@ -202,13 +203,17 @@ struct FileResource {
 
 /// List contents of a Drive folder (or root if folder_id is "root").
 /// Returns folders + supported files. Skips Google-native formats.
-pub async fn list_folder(access_token: &str, folder_id: &str) -> Result<Vec<DriveItem>, String> {
-    let client = reqwest::Client::new();
+pub async fn list_folder(
+    client: &reqwest::Client,
+    access_token: &str,
+    folder_id: &str,
+) -> Result<Vec<DriveItem>, String> {
     let mut all_items: Vec<DriveItem> = Vec::new();
     let mut page_token: Option<String> = None;
 
     loop {
-        let q = format!("'{}' in parents and trashed = false", folder_id);
+        let safe_id = folder_id.replace('\'', "\\'");
+        let q = format!("'{}' in parents and trashed = false", safe_id);
         let mut params = vec![
             ("q", q.as_str()),
             ("pageSize", "1000"),
@@ -259,10 +264,7 @@ pub async fn list_folder(access_token: &str, folder_id: &str) -> Result<Vec<Driv
                     continue;
                 }
 
-                let size: u64 = file
-                    .size
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0);
+                let size: u64 = file.size.and_then(|s| s.parse().ok()).unwrap_or(0);
 
                 all_items.push(DriveItem {
                     id,
@@ -285,16 +287,52 @@ pub async fn list_folder(access_token: &str, folder_id: &str) -> Result<Vec<Driv
 
 /// Recursively list all files in a folder, building relative_dir paths.
 /// Used when user selects a folder for import.
+/// Enforces limits on total files and API calls to prevent DoS on deep folder trees.
 pub async fn list_folder_recursive_flat(
+    client: &reqwest::Client,
     access_token: &str,
     folder_id: &str,
     folder_path: &str,
     depth: u32,
 ) -> Result<Vec<DriveFileInfo>, String> {
+    use std::sync::atomic::AtomicUsize;
+    let file_count = AtomicUsize::new(0);
+    let api_count = AtomicUsize::new(0);
+    list_folder_recursive_inner(
+        client,
+        access_token,
+        folder_id,
+        folder_path,
+        depth,
+        &file_count,
+        &api_count,
+    )
+    .await
+}
+
+async fn list_folder_recursive_inner(
+    client: &reqwest::Client,
+    access_token: &str,
+    folder_id: &str,
+    folder_path: &str,
+    depth: u32,
+    file_count: &std::sync::atomic::AtomicUsize,
+    api_count: &std::sync::atomic::AtomicUsize,
+) -> Result<Vec<DriveFileInfo>, String> {
+    use std::sync::atomic::Ordering;
+
     if depth > MAX_DRIVE_DEPTH {
-        return Err(format!("Folder nesting too deep (>{MAX_DRIVE_DEPTH} levels)"));
+        return Err(format!(
+            "Folder nesting too deep (>{MAX_DRIVE_DEPTH} levels)"
+        ));
     }
-    let items = list_folder(access_token, folder_id).await?;
+
+    let calls = api_count.fetch_add(1, Ordering::Relaxed) + 1;
+    if calls > MAX_RECURSIVE_API_CALLS {
+        return Err(format!("Too many API calls during folder scan (>{MAX_RECURSIVE_API_CALLS}). Folder tree is too large."));
+    }
+
+    let items = list_folder(client, access_token, folder_id).await?;
     let mut results: Vec<DriveFileInfo> = Vec::new();
 
     for item in items {
@@ -304,9 +342,22 @@ pub async fn list_folder_recursive_flat(
             } else {
                 format!("{}/{}", folder_path, item.name)
             };
-            let sub_files = Box::pin(list_folder_recursive_flat(access_token, &item.id, &sub_path, depth + 1)).await?;
+            let sub_files = Box::pin(list_folder_recursive_inner(
+                client,
+                access_token,
+                &item.id,
+                &sub_path,
+                depth + 1,
+                file_count,
+                api_count,
+            ))
+            .await?;
             results.extend(sub_files);
         } else {
+            let count = file_count.fetch_add(1, Ordering::Relaxed) + 1;
+            if count > MAX_RECURSIVE_FILES {
+                return Err(format!("Too many files in folder tree (>{MAX_RECURSIVE_FILES}). Select a smaller folder."));
+            }
             results.push(DriveFileInfo {
                 id: item.id,
                 name: item.name,
@@ -334,21 +385,23 @@ pub struct DriveFileInfo {
 
 // ---------- Download ----------
 
-/// Download a Drive file to OS temp directory.
+/// Download a Drive file to OS temp directory, streaming to disk to avoid buffering large files.
 pub async fn download_file(
+    client: &reqwest::Client,
     file_id: &str,
     file_name: &str,
     access_token: &str,
 ) -> Result<String, String> {
-    let client = reqwest::Client::new();
     let url = format!(
         "https://www.googleapis.com/drive/v3/files/{}?alt=media",
         file_id
     );
 
+    // Override the global timeout — streaming large files can take much longer
     let resp = client
         .get(&url)
         .bearer_auth(access_token)
+        .timeout(std::time::Duration::from_secs(3600))
         .send()
         .await
         .map_err(|e| format!("Drive download error: {e}"))?;
@@ -359,16 +412,36 @@ pub async fn download_file(
         return Err(format!("Drive download failed ({status}): {body}"));
     }
 
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|e| format!("Download read error: {e}"))?;
-
     let safe_name = file_name.replace(['/', '\\', ':'], "_");
     let temp_path = std::env::temp_dir().join(format!("ergonode_drive_{}_{}", file_id, safe_name));
-    tokio::fs::write(&temp_path, &bytes)
+
+    // Stream response body to disk instead of buffering in memory
+    let mut file = tokio::fs::File::create(&temp_path)
         .await
-        .map_err(|e| format!("Cannot write temp file: {e}"))?;
+        .map_err(|e| format!("Cannot create temp file: {e}"))?;
+
+    let stream_result = async {
+        let mut stream = resp.bytes_stream();
+        use futures_util::StreamExt;
+        use tokio::io::AsyncWriteExt;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| format!("Download stream error: {e}"))?;
+            file.write_all(&chunk)
+                .await
+                .map_err(|e| format!("Write error: {e}"))?;
+        }
+        file.flush()
+            .await
+            .map_err(|e| format!("Flush error: {e}"))?;
+        Ok::<(), String>(())
+    }
+    .await;
+
+    if let Err(e) = stream_result {
+        // Clean up partial file on failure
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        return Err(e);
+    }
 
     Ok(temp_path.to_string_lossy().to_string())
 }
@@ -381,7 +454,7 @@ pub async fn is_signed_in(store: &CredentialStore) -> bool {
 }
 
 /// Sign out of Google Drive — delete cached token and revoke it.
-pub async fn sign_out(store: &CredentialStore) -> Result<(), String> {
+pub async fn sign_out(store: &CredentialStore, client: &reqwest::Client) -> Result<(), String> {
     let token_info = store.delete_google_token(&[DRIVE_SCOPE]).await;
 
     // Persist removal to keychain so a stale token doesn't survive reload
@@ -391,11 +464,12 @@ pub async fn sign_out(store: &CredentialStore) -> Result<(), String> {
 
     // Best-effort revoke — try access token, fall back to refresh token
     if let Some(info) = token_info {
-        let revoke_token = info.access_token.as_deref()
+        let revoke_token = info
+            .access_token
+            .as_deref()
             .or(info.refresh_token.as_deref());
 
         if let Some(token) = revoke_token {
-            let client = reqwest::Client::new();
             let _ = client
                 .post("https://oauth2.googleapis.com/revoke")
                 .form(&[("token", token)])

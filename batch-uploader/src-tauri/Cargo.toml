@@ -6,19 +6,21 @@ authors = [""]
 edition = "2021"
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "=2.5.6", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-dialog = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-reqwest = { version = "0.12", features = ["multipart", "json"] }
-tokio = { version = "1", features = ["full"] }
-thiserror = "2"
-dirs = "6"
-mime_guess = "2"
-google-drive3 = "7"
-open = "5"
-keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
-async-trait = "0.1"
+tauri = { version = "=2.10.3", features = [] }
+tauri-plugin-dialog = "=2.6.0"
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.149"
+reqwest = { version = "=0.12.28", features = ["multipart", "json", "stream"] }
+tokio = { version = "=1.50.0", features = ["full"] }
+dirs = "=6.0.0"
+mime_guess = "=2.0.5"
+google-drive3 = "=7.0.0"
+open = "=5.3.3"
+keyring = { version = "=3.6.3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+async-trait = "=0.1.89"
+url = "=2.5.8"
+futures-util = "=0.3.32"
+zeroize = "=1.8.2"

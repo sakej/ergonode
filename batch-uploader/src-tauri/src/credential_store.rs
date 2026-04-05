@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -8,6 +7,7 @@ use async_trait::async_trait;
 use google_drive3::yup_oauth2::storage::{TokenInfo, TokenStorage, TokenStorageError};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
+use zeroize::Zeroize;
 
 const KEYRING_SERVICE: &str = "com.ergonode.uploader";
 const KEYRING_KEY: &str = "credentials";
@@ -30,6 +30,28 @@ pub struct CredentialBlob {
     pub google_tokens: HashMap<String, TokenInfo>,
 }
 
+/// Zeroize sensitive credential fields on drop.
+/// TokenInfo is a foreign type so we can only drain (not zeroize) its entries,
+/// but the HashMap keys (scope strings) are zeroized explicitly.
+impl Zeroize for CredentialBlob {
+    fn zeroize(&mut self) {
+        self.version.zeroize();
+        self.api_url.zeroize();
+        self.api_key.zeroize();
+        self.google_client_id.zeroize();
+        self.google_client_secret.zeroize();
+        for (mut key, _) in self.google_tokens.drain() {
+            key.zeroize();
+        }
+    }
+}
+
+impl Drop for CredentialBlob {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
 /// DTO sent to frontend — exposes all fields except google_tokens
 /// (replaced by has_google_token boolean).
 /// Secrets are sent unmasked because all DTO consumers populate form fields.
@@ -43,8 +65,8 @@ pub struct CredentialBlobDto {
     pub has_google_token: bool,
 }
 
-impl From<&CredentialBlob> for CredentialBlobDto {
-    fn from(blob: &CredentialBlob) -> Self {
+impl CredentialBlobDto {
+    fn from_blob(blob: &CredentialBlob) -> Self {
         Self {
             api_url: blob.api_url.clone(),
             api_key: blob.api_key.clone(),
@@ -73,19 +95,17 @@ impl CredentialStore {
     }
 
     /// Load all credentials from OS keychain (single read).
-    /// Falls back to file if keychain unavailable.
-    /// Exactly one keychain access — legacy migration only runs on first
-    /// save (not here) to avoid extra keychain prompts.
+    /// Returns an error if the keychain is unavailable — no plaintext fallback.
     pub async fn load_from_keychain(&self) -> Result<CredentialBlobDto, String> {
         let blob = Self::read_blob()?;
-        let dto = CredentialBlobDto::from(&blob);
+        let dto = CredentialBlobDto::from_blob(&blob);
         *self.blob.write().await = blob;
         self.dirty.store(false, Ordering::Release);
         Ok(dto)
     }
 
     /// Save current in-memory blob to OS keychain (single write).
-    /// Falls back to file if keychain unavailable.
+    /// Returns an error if the keychain is unavailable — no plaintext fallback.
     /// Also runs one-time legacy keychain cleanup (probe entry, old token entries)
     /// bundled with the save so it doesn't add extra prompts.
     pub async fn save_to_keychain(&self) -> Result<(), String> {
@@ -104,29 +124,12 @@ impl CredentialStore {
 
     /// Delete the keychain entry entirely.
     pub fn delete_keychain_entry() -> Result<(), String> {
-        let mut errors = Vec::new();
-
-        if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, KEYRING_KEY) {
-            if let Err(e) = entry.delete_credential() {
-                // NoEntry is fine — means already deleted
-                if !matches!(e, keyring::Error::NoEntry) {
-                    errors.push(format!("Keychain delete failed: {e}"));
-                }
-            }
-        }
-
-        // Also delete file fallback
-        let path = Self::fallback_path();
-        if path.exists() {
-            if let Err(e) = fs::remove_file(&path) {
-                errors.push(format!("File delete failed: {e}"));
-            }
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors.join("; "))
+        let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_KEY)
+            .map_err(|e| format!("Keychain access failed: {e}"))?;
+        match entry.delete_credential() {
+            Ok(_) => Ok(()),
+            Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(format!("Keychain delete failed: {e}")),
         }
     }
 
@@ -140,7 +143,11 @@ impl CredentialStore {
     }
 
     /// Update Google client credentials in memory.
-    pub async fn set_google_client(&self, client_id: Option<String>, client_secret: Option<String>) {
+    pub async fn set_google_client(
+        &self,
+        client_id: Option<String>,
+        client_secret: Option<String>,
+    ) {
         let mut blob = self.blob.write().await;
         blob.google_client_id = client_id;
         blob.google_client_secret = client_secret;
@@ -215,13 +222,15 @@ impl CredentialStore {
     /// Get DTO for frontend display.
     pub async fn get_dto(&self) -> CredentialBlobDto {
         let blob = self.blob.read().await;
-        CredentialBlobDto::from(&*blob)
+        CredentialBlobDto::from_blob(&blob)
     }
 
     /// Save current in-memory blob to OS keychain (synchronous).
     /// Used for shutdown hook where async context may be unavailable.
     pub fn save_to_keychain_sync(&self) -> Result<(), String> {
-        let blob = self.blob.try_read()
+        let blob = self
+            .blob
+            .try_read()
             .map_err(|_| "Could not acquire lock for shutdown save")?;
         Self::write_blob(&blob)?;
         self.dirty.store(false, Ordering::Release);
@@ -264,79 +273,35 @@ impl CredentialStore {
         sorted.join(",")
     }
 
-    fn fallback_path() -> PathBuf {
-        dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("ergonode-uploader")
-            .join("credentials.json")
-    }
-
+    /// Read credentials from OS keychain. No plaintext fallback.
     fn read_blob() -> Result<CredentialBlob, String> {
-        // Try keychain first — exactly one get_password() call
-        if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, KEYRING_KEY) {
-            match entry.get_password() {
-                Ok(json) => {
-                    if let Ok(blob) = serde_json::from_str::<CredentialBlob>(&json) {
-                        eprintln!("[credentials] Loaded from OS keychain");
-                        return Ok(blob);
-                    }
-                }
-                Err(e) => {
-                    eprintln!("[credentials] Keychain read failed: {e}");
-                }
+        let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_KEY)
+            .map_err(|e| keychain_unavailable_error(&format!("init failed: {e}")))?;
+        match entry.get_password() {
+            Ok(json) => {
+                serde_json::from_str(&json).map_err(|e| format!("Corrupt keychain data: {e}"))
+            }
+            Err(keyring::Error::NoEntry) => Err("No saved credentials found".to_string()),
+            Err(e) => {
+                eprintln!("[credentials] Keychain read failed: {e}");
+                Err(keychain_unavailable_error(&format!("read failed: {e}")))
             }
         }
-
-        // Fall back to file
-        let path = Self::fallback_path();
-        if let Ok(json) = fs::read_to_string(&path) {
-            if let Ok(blob) = serde_json::from_str::<CredentialBlob>(&json) {
-                eprintln!("[credentials] Loaded from file fallback");
-                return Ok(blob);
-            }
-        }
-
-        Err("No saved credentials found".to_string())
     }
 
+    /// Write credentials to OS keychain. No plaintext fallback.
     fn write_blob(blob: &CredentialBlob) -> Result<(), String> {
-        let json = serde_json::to_string(blob)
-            .map_err(|e| format!("Serialize error: {e}"))?;
-
-        // Try keychain first
-        match keyring::Entry::new(KEYRING_SERVICE, KEYRING_KEY) {
-            Ok(entry) => {
-                entry.set_password(&json)
-                    .map_err(|e| format!("Keychain write failed: {e}"))?;
-                eprintln!("[credentials] Saved to OS keychain");
-                Ok(())
-            }
-            Err(_) => {
-                // Fall back to file
-                let path = Self::fallback_path();
-                if let Some(parent) = path.parent() {
-                    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-                }
-                fs::write(&path, json).map_err(|e| e.to_string())?;
-                // Restrict file permissions to owner-only on Unix
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
-                }
-                #[cfg(windows)]
-                {
-                    if let Ok(user) = std::env::var("USERNAME") {
-                        let _ = std::process::Command::new("icacls")
-                            .arg(&path)
-                            .args(["/inheritance:r", "/grant:r", &format!("{user}:(F)")])
-                            .output();
-                    }
-                }
-                eprintln!("[credentials] Saved to file fallback");
-                Ok(())
-            }
-        }
+        let json = serde_json::to_string(blob).map_err(|e| format!("Serialize error: {e}"))?;
+        let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_KEY).map_err(|e| {
+            eprintln!("[credentials] Keychain entry creation failed: {e}");
+            keychain_unavailable_error(&format!("init failed: {e}"))
+        })?;
+        entry.set_password(&json).map_err(|e| {
+            eprintln!("[credentials] Keychain write failed: {e}");
+            keychain_unavailable_error(&format!("write failed: {e}"))
+        })?;
+        eprintln!("[credentials] Saved to OS keychain");
+        Ok(())
     }
 }
 
@@ -361,6 +326,24 @@ impl TokenStorage for CredentialTokenStorage {
         let blob = self.0.blob.read().await;
         blob.google_tokens.get(&key).cloned()
     }
+}
+
+// ---------- Keychain error message ----------
+
+fn keychain_unavailable_error(detail: &str) -> String {
+    format!(
+        "Credentials cannot be saved — OS keychain unavailable ({detail}).\n\n\
+         This app requires your operating system's secure credential storage \
+         (macOS Keychain / Windows Credential Manager / Linux Secret Service) \
+         to save credentials safely. Plaintext storage is not supported.\n\n\
+         The app will still function for the current session \
+         (credentials stay in memory), but won't persist between sessions.\n\n\
+         How to fix:\n\
+         \u{2022} macOS — Open Keychain Access and verify it's unlocked\n\
+         \u{2022} Windows — Ensure Credential Manager service is running (services.msc)\n\
+         \u{2022} Linux — Install and configure a Secret Service provider \
+         (e.g. gnome-keyring or kwallet)"
+    )
 }
 
 // ---------- Legacy migration ----------

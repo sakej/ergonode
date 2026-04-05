@@ -22,9 +22,17 @@ pub fn scan_dir(dir: &Path, root: &Path) -> Result<Vec<ScannedFile>, String> {
     Ok(results)
 }
 
-fn scan_recursive(dir: &Path, root: &Path, results: &mut Vec<ScannedFile>, depth: u32) -> Result<(), String> {
+fn scan_recursive(
+    dir: &Path,
+    root: &Path,
+    results: &mut Vec<ScannedFile>,
+    depth: u32,
+) -> Result<(), String> {
     if depth > MAX_SCAN_DEPTH {
-        return Err(format!("Directory nesting too deep (>{MAX_SCAN_DEPTH} levels): {}", dir.display()));
+        return Err(format!(
+            "Directory nesting too deep (>{MAX_SCAN_DEPTH} levels): {}",
+            dir.display()
+        ));
     }
 
     let entries = std::fs::read_dir(dir)
@@ -35,7 +43,11 @@ fn scan_recursive(dir: &Path, root: &Path, results: &mut Vec<ScannedFile>, depth
         let path = entry.path();
 
         // Skip symlinks to prevent symlink loops
-        if path.symlink_metadata().map(|m| m.is_symlink()).unwrap_or(false) {
+        if path
+            .symlink_metadata()
+            .map(|m| m.is_symlink())
+            .unwrap_or(false)
+        {
             continue;
         }
 
