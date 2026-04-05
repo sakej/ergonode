@@ -510,7 +510,10 @@ pub fn cleanup_stale_temp_files() {
 pub fn delete_temp_file(path: &str) {
     let path = std::path::Path::new(path);
     if let Ok(canonical) = path.canonicalize() {
-        if canonical.starts_with(std::env::temp_dir())
+        let temp_dir = std::env::temp_dir()
+            .canonicalize()
+            .unwrap_or_else(|_| std::env::temp_dir());
+        if canonical.starts_with(&temp_dir)
             && canonical
                 .file_name()
                 .and_then(|n| n.to_str())
