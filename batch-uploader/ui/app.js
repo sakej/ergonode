@@ -1867,6 +1867,12 @@ async function uploadSingleFile(file) {
 function handleRateLimit() {
   if (state.stopping) return;
 
+  // Guard against re-entry (multiple concurrent uploads both rate-limited)
+  if (state.pauseTimer) {
+    clearInterval(state.pauseTimer);
+    state.pauseTimer = null;
+  }
+
   state.paused = true;
   state.consecutiveSuccess = 0;
 
