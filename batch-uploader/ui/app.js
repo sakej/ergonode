@@ -1749,6 +1749,17 @@ function stopUploadQueue() {
   state.stopping = true;
   btnStop.disabled = true;
   btnStop.textContent = "Stopping...";
+
+  // Cancel rate-limit countdown if active
+  if (state.pauseTimer) {
+    clearInterval(state.pauseTimer);
+    state.pauseTimer = null;
+    state.paused = false;
+    rateLimitMsg.classList.add("hidden");
+  }
+
+  // If nothing in flight, finish immediately
+  if (state.activeUploads === 0) finishQueue();
 }
 
 function pumpQueue() {
@@ -1854,6 +1865,8 @@ async function uploadSingleFile(file) {
 }
 
 function handleRateLimit() {
+  if (state.stopping) return;
+
   state.paused = true;
   state.consecutiveSuccess = 0;
 
@@ -1872,10 +1885,11 @@ function handleRateLimit() {
 
   showCountdown();
 
-  const interval = setInterval(() => {
+  state.pauseTimer = setInterval(() => {
     remaining--;
     if (remaining <= 0) {
-      clearInterval(interval);
+      clearInterval(state.pauseTimer);
+      state.pauseTimer = null;
       rateLimitMsg.classList.add("hidden");
       state.paused = false;
 
@@ -1893,6 +1907,10 @@ function finishQueue() {
   state.uploading = false;
   state.stopping = false;
   state.paused = false;
+  if (state.pauseTimer) {
+    clearInterval(state.pauseTimer);
+    state.pauseTimer = null;
+  }
   state.backoff = 5000;
   state.consecutiveSuccess = 0;
   state.concurrency = state.maxConcurrency;
