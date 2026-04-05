@@ -7,7 +7,7 @@ use google_drive3::hyper_util;
 use google_drive3::yup_oauth2;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::sync::oneshot;
+use tokio::sync::watch;
 
 use crate::credential_store::{CredentialStore, CredentialTokenStorage};
 
@@ -82,11 +82,11 @@ fn is_google_native_format(mime_type: &str) -> bool {
 // ---------- OAuth ----------
 
 /// Run OAuth flow — uses cached token if available, otherwise opens browser.
-/// Supports cancellation via the provided oneshot receiver.
+/// Supports cancellation via the provided watch receiver.
 /// Reads client ID/secret from CredentialStore (with compile-time fallback).
 pub async fn authenticate(
     app: AppHandle,
-    cancel_rx: oneshot::Receiver<()>,
+    mut cancel_rx: watch::Receiver<bool>,
     store: Arc<CredentialStore>,
 ) -> Result<String, String> {
     let client_id = store
@@ -103,7 +103,7 @@ pub async fn authenticate(
     // server runs in a spawned task that shuts itself down when its channels close.
     let token_result = tokio::select! {
         result = auth.token(&[DRIVE_SCOPE]) => result,
-        _ = cancel_rx => {
+        _ = cancel_rx.changed() => {
             return Err("Auth cancelled".to_string());
         }
     };
@@ -117,10 +117,15 @@ pub async fn authenticate(
                 store.delete_google_token(&[DRIVE_SCOPE]).await;
                 let auth2 =
                     build_auth(&client_id, &client_secret, app.clone(), store.clone()).await?;
-                auth2
-                    .token(&[DRIVE_SCOPE])
-                    .await
-                    .map_err(|e| format!("OAuth failed: {e}"))?
+                // Retry is also cancellable
+                tokio::select! {
+                    result = auth2.token(&[DRIVE_SCOPE]) => {
+                        result.map_err(|e| format!("OAuth failed: {e}"))?
+                    }
+                    _ = cancel_rx.changed() => {
+                        return Err("Auth cancelled".to_string());
+                    }
+                }
             } else {
                 return Err(format!("OAuth failed: {e}"));
             }

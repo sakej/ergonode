@@ -5,14 +5,14 @@ mod fs_utils;
 mod google_drive;
 
 use std::sync::Arc;
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{watch, Mutex};
 
 use config::AppConfig;
 use credential_store::{CredentialBlobDto, CredentialStore};
 use ergonode::{BatchDeleteResult, ErgonodeClient, FolderInfo, UploadResult};
 
 /// Holds the cancel sender for an in-progress Google Drive auth flow.
-struct AuthCancelState(Mutex<Option<oneshot::Sender<()>>>);
+struct AuthCancelState(Mutex<Option<watch::Sender<bool>>>);
 
 /// Holds the current Google Drive access token (Rust-side only, never sent to frontend).
 struct DriveTokenState(Mutex<Option<String>>);
@@ -243,11 +243,11 @@ async fn google_drive_auth(
     cred_store: tauri::State<'_, Arc<CredentialStore>>,
     token_state: tauri::State<'_, DriveTokenState>,
 ) -> Result<(), String> {
-    let (tx, rx) = oneshot::channel();
+    let (tx, rx) = watch::channel(false);
     {
         let mut guard = cancel_state.0.lock().await;
         if let Some(old_tx) = guard.take() {
-            let _ = old_tx.send(());
+            let _ = old_tx.send(true);
         }
         *guard = Some(tx);
     }
@@ -267,7 +267,7 @@ async fn google_drive_auth_cancel(
     cancel_state: tauri::State<'_, AuthCancelState>,
 ) -> Result<(), String> {
     if let Some(tx) = cancel_state.0.lock().await.take() {
-        let _ = tx.send(());
+        let _ = tx.send(true);
     }
     Ok(())
 }
