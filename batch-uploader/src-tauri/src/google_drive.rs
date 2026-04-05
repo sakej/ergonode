@@ -101,6 +101,9 @@ pub async fn authenticate(
     // Race: auth token vs cancel signal.
     // Dropping auth.token() on cancel is safe — yup_oauth2's internal HTTP
     // server runs in a spawned task that shuts itself down when its channels close.
+    // Note: cancel_rx.changed() also returns if the sender is dropped (RecvError),
+    // which we treat as cancellation. The sender in AuthCancelState outlives this
+    // call (cleared only after authenticate returns), so this is safe.
     let token_result = tokio::select! {
         result = auth.token(&[DRIVE_SCOPE]) => result,
         _ = cancel_rx.changed() => {
