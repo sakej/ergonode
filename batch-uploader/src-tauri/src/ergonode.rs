@@ -204,10 +204,10 @@ impl ErgonodeClient {
                 Some(cursor) => {
                     let escaped_cursor = escape_gql(cursor);
                     format!(
-                        r#"{{"query":"{{ multimediaFolderList(first:300, after:\"{escaped_cursor}\") {{ edges {{ node {{ name path }} cursor }} pageInfo {{ hasNextPage }} }} }}"}}"#
+                        r#"{{"query":"{{ multimediaFolderList(first:50, after:\"{escaped_cursor}\") {{ edges {{ node {{ name path }} cursor }} pageInfo {{ hasNextPage }} }} }}"}}"#
                     )
                 },
-                None => r#"{"query":"{ multimediaFolderList(first:300) { edges { node { name path } cursor } pageInfo { hasNextPage } } }"}"#.to_string(),
+                None => r#"{"query":"{ multimediaFolderList(first:50) { edges { node { name path } cursor } pageInfo { hasNextPage } } }"}"#.to_string(),
             };
 
             let resp = self
