@@ -1141,13 +1141,10 @@ async function addFoldersByPath(dirPaths) {
   scanSpinner.classList.add("hidden");
   uploadControls.classList.remove("hidden");
 
-  // Show folder options inside modal if there are subfolders
+  // Show folder options — always show "include root", only show "flat upload" when subfolders exist
   const hasStructure = allScanned.some(f => f.relative_dir.length > 0);
-  if (hasStructure) {
-    folderModalOptions.classList.remove("hidden");
-  } else {
-    folderModalOptions.classList.add("hidden");
-  }
+  folderModalOptions.classList.remove("hidden");
+  flatUploadEl.closest("label").classList.toggle("hidden", !hasStructure);
 
   // Compute display destination
   const destName = state.selectedFolder
