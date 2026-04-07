@@ -68,7 +68,11 @@ jobs:
             sleep 2
             rm -rf "$MOUNT/.fseventsd" "$MOUNT/.DS_Store" "$MOUNT/.Trashes" "$MOUNT/.Spotlight-V100" 2>/dev/null || true
             sync
-            hdiutil detach "$MOUNT" -force
+            for i in 1 2 3 4 5; do
+              hdiutil detach "$MOUNT" -force 2>/dev/null && break
+              echo "Detach attempt $i failed, retrying in 3s..."
+              sleep 3
+            done
             rm "$DMG"
             hdiutil convert "$TEMP" -format UDZO -o "$DMG"
             rm "$TEMP"
