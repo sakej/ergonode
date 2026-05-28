@@ -2,7 +2,7 @@
 name = "ergonode-uploader"
 version = "1.6.2"
 description = "Ergonode Batch Image Uploader"
-authors = [""]
+authors = ["Marcin Krasicki"]
 edition = "2021"
 
 [build-dependencies]
